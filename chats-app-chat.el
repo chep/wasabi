@@ -1,0 +1,512 @@
+;;; chats-app-chat.el --- Chat buffer for chats-app  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2024 Alvaro Ramirez
+
+;; Author: Alvaro Ramirez https://xenodium.com
+;; URL: https://github.com/xenodium/chats-app
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "29.1"))
+
+;; This file is not part of GNU Emacs.
+
+;; This package is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 3, or (at your option)
+;; any later version.
+
+;; This package is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; chats-app-chat provides the chat buffer functionality for chats-app,
+;; handling the display and interaction with individual WhatsApp
+;; conversations.
+
+;;; Code:
+
+(require 'cl-lib)
+
+(defvar-local chats-app-chat--chat (chats-app-chat--make-chat)
+  "Alist containing chat information for this buffer.
+Keys:
+  :chat-jid - The chat JID
+  :contact-name - The contact name
+  :max-sender-width - Maximum sender name width for alignment")
+
+(defvar-local chats-app-chat--prompt-marker nil
+  "Marker for the start of the prompt.")
+
+(defvar-local chats-app-chat--input-start-marker nil
+  "Marker for the start of user input.")
+
+(cl-defun chats-app-chat--make-chat (&key chat-jid contact-name max-sender-width messages)
+  "Create a chat alist with CHAT-JID, CONTACT-NAME, MAX-SENDER-WIDTH, and MESSAGES."
+  (list (cons :chat-jid chat-jid)
+        (cons :contact-name contact-name)
+        (cons :max-sender-width (or max-sender-width 0))
+        (cons :messages (or messages nil))))
+
+(defvar chats-app-chat-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "q") #'chats-app-chat-quit)
+    (define-key map (kbd "n") #'chats-app-chat-next-message)
+    (define-key map (kbd "p") #'chats-app-chat-previous-message)
+    (define-key map (kbd "g") #'chats-app-chat-refresh)
+    (define-key map (kbd "RET") #'chats-app-chat-send-input)
+    (define-key map (kbd "C-a") #'chats-app-chat-beginning-of-line)
+    map)
+  "Keymap for `chats-app-chat-mode'.")
+
+;; Parsing functions - convert protocol structures to internal format
+
+(defun chats-app-chat--parse-content (p-message)
+  "Parse displayable content from protocol P-MESSAGE structure.
+Returns string like \"Hello\" or \"[image]\"."
+  (cond
+   ((map-elt p-message 'conversation)
+    (map-elt p-message 'conversation))
+   ((map-elt p-message 'extendedTextMessage)
+    (map-nested-elt p-message '(extendedTextMessage text)))
+   ((map-elt p-message 'imageMessage)
+    (chats-app--log "Image message: %s" p-message)
+    (concat
+     (if (map-nested-elt p-message '(imageMessage JPEGThumbnail))
+         (propertize "[image]" 'display
+                     (create-image (base64-decode-string
+                                    (map-nested-elt p-message '(imageMessage JPEGThumbnail)))
+                                   'jpeg t
+                                   :max-width 40 :max-height 40))
+       "[image]")
+     (when (map-nested-elt p-message '(imageMessage caption))
+       (concat "\n" (map-nested-elt p-message '(imageMessage caption))))))
+   ((map-elt p-message 'videoMessage)
+    (or (map-nested-elt p-message '(videoMessage caption)) "[video]"))
+   ((map-elt p-message 'documentMessage) "[document]")
+   ((map-elt p-message 'audioMessage) "[audio]")
+   ((map-elt p-message 'stickerMessage) "[sticker]")
+   (t "[unknown]")))
+
+(cl-defun chats-app-chat--parse-message (p-message &key chat-jid contact-name contacts)
+  "Parse a protocol message (from database) into internal display format.
+Returns alist with :sender-name, :timestamp, :content.
+CONTACTS should be internal contacts alist for sender name resolution."
+  (let* ((data-json (map-elt p-message 'data_json))
+         (timestamp (map-elt p-message 'timestamp)))
+    (if (and data-json (not (string-empty-p data-json)))
+        ;; Parse from data_json (preferred - has full info)
+        (let* ((data (json-parse-string data-json :object-type 'alist
+                                        :null-object nil
+                                        :false-object nil))
+               (p-info (map-elt data 'Info))
+               (p-msg (map-elt data 'Message))
+               (is-from-me (map-elt p-info 'IsFromMe))
+               (sender-jid (map-elt p-info 'Sender))
+               (sender-name (if is-from-me
+                                "Me"
+                              (or
+                               ;; Try to look up sender in contacts
+                               (and sender-jid contacts
+                                    (when-let ((contact (assoc (intern sender-jid) contacts)))
+                                      (let ((full-name (map-elt (cdr contact) :full-name))
+                                            (push-name (map-elt (cdr contact) :push-name)))
+                                        (or (and full-name (not (string-empty-p full-name)) full-name)
+                                            (and push-name (not (string-empty-p push-name)) push-name)))))
+                               ;; Use PushName from message info
+                               (let ((push-name (map-elt p-info 'PushName)))
+                                 (and push-name (not (string-empty-p push-name)) push-name))
+                               ;; Use contact-name parameter if available
+                               (and contact-name (not (string-empty-p contact-name)) contact-name)
+                               ;; Extract phone number from sender JID as fallback
+                               (and sender-jid
+                                    (if (string-match "\\([^@]+\\)@" sender-jid)
+                                        (match-string 1 sender-jid)
+                                      sender-jid))
+                               ;; Ultimate fallback
+                               "Unknown")))
+               (content (chats-app-chat--parse-content p-msg)))
+          `((:sender-name . ,sender-name)
+            (:timestamp . ,(map-elt p-info 'Timestamp))
+            (:content . ,content)))
+      ;; Fallback: parse from basic fields (outgoing messages without data_json)
+      (let* ((is-from-me (string= (map-elt p-message 'sender_jid) "me"))
+             (sender-name (if is-from-me "Me" (or contact-name chat-jid)))
+             (content (or (map-elt p-message 'text_content) "[message]")))
+        `((:sender-name . ,sender-name)
+          (:timestamp . ,timestamp)
+          (:content . ,content))))))
+
+(cl-defun chats-app-chat--parse-notification (&key p-message p-info contact-name chat-jid)
+  "Parse protocol notification MESSAGE and INFO into internal message format.
+Returns alist with :sender-name, :timestamp, :content."
+  (let* ((is-from-me (map-elt p-info 'IsFromMe))
+         (sender-name (if is-from-me
+                          "Me"
+                        (or contact-name
+                            (map-elt p-info 'PushName)
+                            (when-let ((sender (map-elt p-info 'Sender)))
+                              (if (string-match "\\([^@]+\\)@" sender)
+                                  (match-string 1 sender)
+                                sender))
+                            chat-jid)))
+         (content (chats-app-chat--parse-content p-message))
+         (timestamp (map-elt p-info 'Timestamp)))
+    `((:sender-name . ,sender-name)
+      (:timestamp . ,timestamp)
+      (:content . ,content))))
+
+(cl-defun chats-app-chat--parse-messages (p-messages &key chat-jid contact-name contacts)
+  "Parse array of protocol messages into list of internal display messages.
+Returns list of message alists, sorted by timestamp (oldest first)."
+  (let* ((parsed (delq nil
+                       (mapcar (lambda (p-msg)
+                                 (chats-app-chat--parse-message p-msg
+                                                                :chat-jid chat-jid
+                                                                :contact-name contact-name
+                                                                :contacts contacts))
+                               (append p-messages nil))))
+         (sorted (sort parsed
+                       (lambda (a b)
+                         (string< (map-elt a :timestamp)
+                                  (map-elt b :timestamp))))))
+    sorted))
+
+(defun chats-app-chat--calculate-max-sender-width (messages)
+  "Calculate maximum sender name width from internal MESSAGES for alignment."
+  (if (null messages)
+      0
+    (apply #'max
+           (mapcar (lambda (msg)
+                     (string-width (map-elt msg :sender-name)))
+                   messages))))
+
+;; UI functions
+
+(defun chats-app-chat--setup-prompt ()
+  "Set up the read-only prompt at the end of the buffer."
+  (goto-char (point-max))
+  (let ((inhibit-read-only t)
+        (prompt-start (point)))
+    ;; Ensure we're on a new line
+    (unless (bolp)
+      (insert "\n"))
+    (insert "> ")
+    (setq chats-app-chat--prompt-marker (copy-marker prompt-start))
+    (setq chats-app-chat--input-start-marker (point-marker))
+    (set-marker-insertion-type chats-app-chat--input-start-marker nil)
+    (set-marker-insertion-type chats-app-chat--prompt-marker t)
+    (put-text-property prompt-start (point) 'read-only t)
+    (put-text-property prompt-start (point) 'rear-nonsticky '(read-only))
+    (put-text-property prompt-start (point) 'front-sticky '(read-only))))
+
+(defun chats-app-chat--get-prompt-input ()
+  "Get the current input text after the prompt."
+  (when chats-app-chat--input-start-marker
+    (buffer-substring-no-properties chats-app-chat--input-start-marker (point-max))))
+
+(defun chats-app-chat--clear-prompt-input ()
+  "Clear the input area after the prompt."
+  (when chats-app-chat--input-start-marker
+    (delete-region chats-app-chat--input-start-marker (point-max))))
+
+(define-derived-mode chats-app-chat-mode fundamental-mode "ChatsApp"
+  "Major mode for displaying individual chat conversations.
+
+\\{chats-app-chat-mode-map}"
+  (setq-local inhibit-read-only nil))
+
+(defun chats-app-chat--in-input-area-p ()
+  "Return non-nil if point is in the input area."
+  (and chats-app-chat--input-start-marker
+       (>= (point) chats-app-chat--input-start-marker)))
+
+(defun chats-app-chat-beginning-of-line ()
+  "Like `move-beginning-of-line' but prompt-aware."
+  (interactive)
+  (if (and (chats-app-chat--in-input-area-p)
+           chats-app-chat--input-start-marker)
+      (if (= (point) chats-app-chat--input-start-marker)
+          ;; Already at input start, go to real beginning
+          (move-beginning-of-line 1)
+        ;; Go to input start
+        (goto-char chats-app-chat--input-start-marker))
+    ;; Not in input area, use default behavior
+    (move-beginning-of-line 1)))
+
+(defun chats-app-chat-quit ()
+  "Quit the chat buffer."
+  (interactive)
+  (unless (derived-mode-p 'chats-app-chat-mode)
+    (error "Not in a chat buffer"))
+  (if (chats-app-chat--in-input-area-p)
+      (self-insert-command 1)
+    (quit-restore-window (get-buffer-window (current-buffer)) 'kill)))
+
+(defun chats-app-chat-send-input ()
+  "Send the current input as a message."
+  (interactive)
+  (unless (chats-app-chat--in-input-area-p)
+    (user-error "Press RET after > prompt to send a message"))
+  (when (string-empty-p (string-trim (chats-app-chat--get-prompt-input)))
+    (user-error "Nothing to send"))
+  (unless chats-app-chat--chat
+    (error "No chat information available"))
+  (unless (map-elt chats-app-chat--chat :chat-jid)
+    (error "No chat JID available"))
+  (let ((text (string-trim (chats-app-chat--get-prompt-input)))
+        (chat-jid (map-elt chats-app-chat--chat :chat-jid))
+        (chat-buffer (current-buffer)))
+    (chats-app-chat--clear-prompt-input)
+    (message "Sending...")
+    (with-current-buffer (chats-app--buffer)
+      (chats-app--send-chat-send-text-request
+       :phone chat-jid
+       :body text
+       :on-failure (lambda (error)
+                     (message "Failed to send")
+                     (chats-app--log "Failed to send message: %s"
+                                     (or (map-elt error 'message)
+                                         "unknown error"))
+                     ;; Restore cleared input
+                     (with-current-buffer chat-buffer
+                       (goto-char (point-max))
+                       (insert text)))
+       :on-success (lambda (response)
+                     (message "Sent")
+                     ;; Response Timestamp is Unix timestamp (integer),
+                     ;; convert to ISO 8601 string.
+                     (let* ((timestamp-str (format-time-string "%Y-%m-%dT%H:%M:%S%z" (map-elt response 'Timestamp)))
+                            (message `((:sender-name . "Me")
+                                       (:timestamp . ,timestamp-str)
+                                       (:content . ,text))))
+                       (with-current-buffer chat-buffer
+                         (chats-app-chat--append-message message))
+                       (with-current-buffer chat-buffer
+                         (goto-char (point-max)))))))))
+
+(defun chats-app-chat-refresh ()
+  "Refresh the current chat buffer by fetching new messages."
+  (interactive)
+  (if (chats-app-chat--in-input-area-p)
+      (self-insert-command 1)
+    (unless chats-app-chat--chat
+      (error "No chat information available"))
+    (let ((chat-jid (or (map-elt chats-app-chat--chat :chat-jid)
+                        (error "No chat JID available")))
+          (contact-name (map-elt chats-app-chat--chat :contact-name)))
+      (with-current-buffer (chats-app--buffer)
+        (chats-app--send-chat-history-request
+         :chat-jid chat-jid
+         :contact-name contact-name
+         :on-finished (lambda ()
+                        (message "Refreshed")))))))
+
+(defun chats-app-chat-new-message ()
+  "Send a new message in the current chat."
+  (interactive)
+  (unless chats-app-chat--chat
+    (error "No chat information available"))
+  (let ((chat-jid (or (map-elt chats-app-chat--chat :chat-jid)
+                      (error "No chat JID available")))
+        (contact-name (map-elt chats-app-chat--chat :contact-name))
+        (chat-buffer (current-buffer)))
+    (let ((message (read-string (format "Message to %s: " (or contact-name chat-jid)))))
+      (when (and message (not (string-empty-p message)))
+        (with-current-buffer (chats-app--buffer)
+          (chats-app--send-chat-send-text-request
+           :phone chat-jid
+           :body message
+           :on-success (lambda (_response)
+                         (message "Message sent to %s" (or contact-name chat-jid))
+                         ;; Optionally refresh to show the sent message
+                         (with-current-buffer chat-buffer
+                           (chats-app-chat-refresh)))))))))
+
+(defun chats-app-chat-next-message ()
+  "Jump to the next message (sender line)."
+  (interactive)
+  (unless (derived-mode-p 'chats-app-chat-mode)
+    (error "Not in a chat buffer"))
+  (if (chats-app-chat--in-input-area-p)
+      (self-insert-command 1)
+    ;; First, skip past the current sender if we're on one
+    (let ((start-pos (save-excursion
+                       (end-of-line)
+                       (if (get-text-property (point) 'chats-app-sender)
+                           (or (next-single-property-change (point) 'chats-app-sender)
+                               (point-max))
+                         (point)))))
+      ;; Then find the next sender
+      (let ((pos (next-single-property-change start-pos 'chats-app-sender)))
+        (if (and pos (get-text-property pos 'chats-app-sender))
+            (progn
+              (goto-char pos)
+              (beginning-of-line))
+          ;; If at last message, bump to prompt.
+          (goto-char (point-max)))))))
+
+(defun chats-app-chat-previous-message ()
+  "Jump to the previous message (sender line)."
+  (interactive)
+  (unless (derived-mode-p 'chats-app-chat-mode)
+    (error "Not in a chat buffer"))
+  (if (chats-app-chat--in-input-area-p)
+      (self-insert-command 1)
+    ;; First, skip to the start of current sender if we're in the middle of one
+    (let ((start-pos (if (get-text-property (point) 'chats-app-sender)
+                         (or (previous-single-property-change (point) 'chats-app-sender)
+                             (point-min))
+                       (point))))
+      ;; Then find the previous sender
+      (let ((pos (previous-single-property-change start-pos 'chats-app-sender)))
+        (if pos
+            ;; Move to the start of that sender region
+            (let ((sender-start (or (previous-single-property-change pos 'chats-app-sender)
+                                    (point-min))))
+              (progn
+                (goto-char (if (get-text-property sender-start 'chats-app-sender)
+                               sender-start
+                             pos))
+                (beginning-of-line)))
+          (message "No previous message"))))))
+
+(defun chats-app-chat--refresh (messages)
+  "Refresh the current chat buffer with internal MESSAGES.
+MESSAGES is a list of already-parsed internal message alists."
+  (unless (derived-mode-p 'chats-app-chat-mode)
+    (error "Not in a chat buffer"))
+
+  ;; Store messages
+  (let* ((max-width (chats-app-chat--calculate-max-sender-width messages)))
+    (map-put! chats-app-chat--chat :messages messages)
+    (map-put! chats-app-chat--chat :max-sender-width max-width))
+
+  ;; Render
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (if (null messages)
+        (let ((start (point)))
+          (insert "No messages to display\n")
+          (put-text-property start (point) 'read-only t))
+      (chats-app-chat--render-messages messages)
+      (let ((start (point)))
+        (insert "\n\n")
+        (put-text-property start (point) 'read-only t)))
+    (chats-app-chat--setup-prompt)
+    (goto-char (point-max))))
+
+(cl-defun chats-app-chat--render-message (&key sender-name timestamp content max-sender-width)
+  "Render a single internal message.
+SENDER-NAME is the display name of the sender.
+TIMESTAMP is the ISO8601 timestamp string.
+CONTENT is the display content (already parsed, may include text properties).
+MAX-SENDER-WIDTH is used for padding alignment."
+  (let* ((col1-width max-sender-width)
+         (is-from-me (string= sender-name "Me"))
+         (sender (propertize sender-name
+                             'face `(:inherit ,(if is-from-me
+                                                   'font-lock-variable-name-face
+                                                 'font-lock-function-name-face) :box nil)
+                             'chats-app-sender t))
+         (sender-padding (make-string (max 0 (- (or max-sender-width 0)
+                                                (string-width sender))) ?\s))
+         (time (when timestamp
+                 (propertize (format-time-string "%H:%M" (parse-iso8601-time-string timestamp))
+                             'face 'font-lock-comment-face))))
+    ;;
+    ;; Intended layout per message:
+    ;;
+    ;; Mateo 15:32
+    ;;       Hello
+    ;;
+    (concat sender-padding sender " " (or time "")
+            "\n" (make-string col1-width ?\s) " "
+            (string-replace "\n" (concat "\n " (make-string col1-width ?\s)) content))))
+
+(defun chats-app-chat--render-messages (messages)
+  "Render internal format MESSAGES to current buffer.
+MESSAGES is a list of alists with :sender-name, :timestamp, :content."
+  (let* ((max-sender-width (map-elt chats-app-chat--chat :max-sender-width))
+         (message-lines
+          (mapcar
+           (lambda (msg)
+             (chats-app-chat--render-message
+              :sender-name (map-elt msg :sender-name)
+              :timestamp (map-elt msg :timestamp)
+              :content (map-elt msg :content)
+              :max-sender-width max-sender-width))
+           messages)))
+    (let ((start (point)))
+      (insert (mapconcat #'identity message-lines "\n\n"))
+      (put-text-property start (point) 'read-only t))))
+
+(defun chats-app-chat--append-message (message)
+  "Append a single internal MESSAGE to current chat buffer.
+MESSAGE is an alist with :sender-name, :timestamp, :content.
+Updates :messages list and :max-sender-width in chat state."
+  (unless (derived-mode-p 'chats-app-chat-mode)
+    (error "Not in a chat buffer"))
+  (unless message
+    (error "message is required"))
+  (let ((inhibit-read-only t)
+        (saved-input nil))
+    (save-excursion
+      (when chats-app-chat--prompt-marker
+        ;; Save any user input before deleting the prompt
+        (setq saved-input (chats-app-chat--get-prompt-input))
+        ;; Delete the existing prompt
+        (delete-region chats-app-chat--prompt-marker (point-max)))
+      (goto-char (point-max))
+      (let* ((start (point))
+             (sender-width (string-width (map-elt message :sender-name)))
+             (new-max-width (max (or (map-elt chats-app-chat--chat :max-sender-width) 0)
+                                 sender-width)))
+        ;; Update max-sender-width if needed
+        (when (> sender-width (map-elt chats-app-chat--chat :max-sender-width))
+          (map-put! chats-app-chat--chat :max-sender-width new-max-width))
+        ;; Append to messages list
+        (map-put! chats-app-chat--chat :messages
+                  (append (map-elt chats-app-chat--chat :messages)
+                          (list message)))
+        ;; Render the message
+        (insert (chats-app-chat--render-message
+                 :sender-name (map-elt message :sender-name)
+                 :timestamp (map-elt message :timestamp)
+                 :content (map-elt message :content)
+                 :max-sender-width (map-elt chats-app-chat--chat :max-sender-width)))
+        (insert "\n\n")
+        (put-text-property start (point) 'read-only t))
+      (chats-app-chat--setup-prompt)
+      ;; Restore saved input
+      (when (and saved-input (not (string-empty-p saved-input)))
+        (goto-char (point-max))
+        (insert saved-input)))))
+
+(cl-defun chats-app-chat--start (&key chat-jid messages contact-name)
+  "Create and display a chat buffer for CHAT-JID.
+MESSAGES is a list of already-parsed internal message alists.
+CONTACT-NAME is the display name of the contact (or nil if not available).
+Displays messages in a two-column format: sender | message."
+  (unless chat-jid
+    (error ":chat-jid is required"))
+  (unless messages
+    (error ":messages is required"))
+  ;; TODO: Consolidate buffer creation logic.
+  (let ((chat-buffer (get-buffer-create (format "*ChatsApp: %s*" (or contact-name chat-jid)))))
+    (with-current-buffer chat-buffer
+      (unless (derived-mode-p 'chats-app-chat-mode)
+        (chats-app-chat-mode))
+      (setq chats-app-chat--chat (chats-app-chat--make-chat :chat-jid chat-jid
+                                                            :contact-name contact-name))
+      (chats-app-chat--refresh messages)
+      (goto-char (point-max)))
+
+    (switch-to-buffer chat-buffer)))
+
+(provide 'chats-app-chat)
+;;; chats-app-chat.el ends here
