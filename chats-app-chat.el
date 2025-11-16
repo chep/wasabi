@@ -146,10 +146,13 @@ Returns string like \"Hello\" or \"[image]\"."
    ((map-elt p-message 'documentMessage) "[document]")
    ((map-elt p-message 'audioMessage) "[audio]")
    ((map-elt p-message 'stickerMessage)
-    (message "[sticker]\n\n%s" p-message)
+    ;; (message "[sticker]\n\n%s" p-message)
     "[sticker]")
+   ((map-elt p-message 'reactionMessage)
+    ;; (message "[reaction]\n\n%s" p-message)
+    "[reaction]")
    (t
-    (message "[unknown]\n\n%s" p-message)
+    ;; (message "[unknown]\n\n%s" p-message)
     "[unknown]")))
 
 (cl-defun chats-app-chat--parse-message (p-message &key chat-jid contact-name contacts)
