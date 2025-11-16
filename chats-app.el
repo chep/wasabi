@@ -319,9 +319,9 @@ For a specific chat JID, stores message array in :chats and opens chat buffer."
                                     ;; Parse protocol messages to internal format
                                     (let* ((contacts (map-elt (chats-app--state) :contacts))
                                            (messages (chats-app-chat--parse-messages response
-                                                                                    :chat-jid chat-jid
-                                                                                    :contact-name contact-name
-                                                                                    :contacts contacts))
+                                                                                     :chat-jid chat-jid
+                                                                                     :contact-name contact-name
+                                                                                     :contacts contacts))
                                            ;; TODO: Consolidate buffer creation logic.
                                            (chat-buffer (get-buffer (format "*ChatsApp: %s*" (or contact-name chat-jid)))))
                                       (if chat-buffer
@@ -360,6 +360,33 @@ Calls ON-FAILURE with error if sending fails."
                     :on-failure (or on-failure
                                     (lambda (error)
                                       (message "Failed to send message: %s" (or (map-elt error 'message) "unknown"))))))
+
+(cl-defun chats-app--send-download-image-request (&key url direct-path media-key mimetype
+                                                       file-enc-sha256 file-sha256 file-length
+                                                       on-success on-failure)
+  "Download and decrypt an image from WhatsApp servers.
+Calls ON-SUCCESS with response containing decrypted image data.
+Calls ON-FAILURE with error if download fails."
+  (unless (derived-mode-p 'chats-app-mode 'chats-app-chat-mode)
+    (error "Not in a chats buffer"))
+  (unless url
+    (error ":url is required"))
+  (acp-send-request :client (map-elt (chats-app--state) :client)
+                    :request (chats-app--make-download-image-request
+                              :token chats-app-user-token
+                              :url url
+                              :direct-path direct-path
+                              :media-key media-key
+                              :mimetype mimetype
+                              :file-enc-sha256 file-enc-sha256
+                              :file-sha256 file-sha256
+                              :file-length file-length)
+                    :on-success (or on-success
+                                    (lambda (_response)
+                                      (message "Image downloaded")))
+                    :on-failure (or on-failure
+                                    (lambda (error)
+                                      (message "Failed to download image: %s" (or (map-elt error 'message) "unknown"))))))
 
 (cl-defun chats-app--make-session-disconnect-request (&key token)
   "Instantiate a \"session.disconnect\" request.
@@ -1071,3 +1098,41 @@ Returns list of internal chat entry alists, filtered and sorted."
       (push `(QuotedText . ,quoted-text) params))
     `((:method . "chat.send.text")
       (:params . ,params))))
+
+(cl-defun chats-app--make-download-image-request (&key token
+                                                       url
+                                                       direct-path
+                                                       media-key
+                                                       mimetype
+                                                       file-enc-sha256
+                                                       file-sha256
+                                                       file-length)
+  "Instantiate a \"chat.download.image\" request.
+
+  Required parameters:
+    TOKEN - User authentication token
+    URL - WhatsApp media URL
+    DIRECT-PATH - WhatsApp direct path to encrypted file
+    MEDIA-KEY - Base64 encryption key for decrypting the image
+    MIMETYPE - Image MIME type (e.g., \"image/jpeg\")
+    FILE-ENC-SHA256 - SHA256 hash of encrypted file
+    FILE-SHA256 - SHA256 hash of decrypted file
+    FILE-LENGTH - File size in bytes
+
+  Downloads and decrypts an image from WhatsApp servers. Returns
+  a data URL with the decrypted image data.
+
+  See: stdio.go:248, handlers.go (DownloadImage)"
+  (unless token
+    (error ":token is required"))
+  (unless url
+    (error ":url is required"))
+  `((:method . "chat.download.image")
+    (:params . ((token . ,token)
+                (Url . ,url)
+                (DirectPath . ,direct-path)
+                (MediaKey . ,media-key)
+                (Mimetype . ,mimetype)
+                (FileEncSHA256 . ,file-enc-sha256)
+                (FileSHA256 . ,file-sha256)
+                (FileLength . ,file-length)))))

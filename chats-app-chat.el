@@ -75,16 +75,35 @@ Returns string like \"Hello\" or \"[image]\"."
     (map-nested-elt p-message '(extendedTextMessage text)))
    ((map-elt p-message 'imageMessage)
     (chats-app--log "Image message: %s" p-message)
-    (concat
-     (if (map-nested-elt p-message '(imageMessage JPEGThumbnail))
-         (propertize "[image]" 'display
-                     (create-image (base64-decode-string
-                                    (map-nested-elt p-message '(imageMessage JPEGThumbnail)))
-                                   'jpeg t
-                                   :max-width 40 :max-height 40))
-       "[image]")
-     (when (map-nested-elt p-message '(imageMessage caption))
-       (concat "\n" (map-nested-elt p-message '(imageMessage caption))))))
+    (let* ((thumbnail (map-nested-elt p-message '(imageMessage JPEGThumbnail)))
+           (image-text (if thumbnail
+                           (propertize "[image]" 'display
+                                       (create-image (base64-decode-string thumbnail)
+                                                     'jpeg t
+                                                     :max-width 120 :max-height 120))
+                         "[image]")))
+      ;; Store metadata as text properties
+      (add-text-properties 0 (length image-text)
+                           `(image-url ,(map-nested-elt p-message '(imageMessage URL))
+                                       image-direct-path ,(map-nested-elt p-message '(imageMessage directPath))
+                                       image-media-key ,(map-nested-elt p-message '(imageMessage mediaKey))
+                                       image-mimetype ,(map-nested-elt p-message '(imageMessage mimetype))
+                                       image-file-enc-sha256 ,(map-nested-elt p-message '(imageMessage fileEncSHA256))
+                                       image-file-sha256 ,(map-nested-elt p-message '(imageMessage fileSHA256))
+                                       image-file-length ,(map-nested-elt p-message '(imageMessage fileLength))
+                                       image-width ,(map-nested-elt p-message '(imageMessage width))
+                                       image-height ,(map-nested-elt p-message '(imageMessage height))
+                                       image-thumbnail ,thumbnail)
+                           image-text)
+      ;; Add action to view image on RET
+      (setq image-text (chats-app--add-action-to-text
+                        image-text
+                        (lambda ()
+                          (interactive)
+                          (chats-app-chat-view-image-at-point))))
+      (concat image-text
+              (when-let ((caption (map-nested-elt p-message '(imageMessage caption))))
+                (concat "\n" caption)))))
    ((map-elt p-message 'videoMessage)
     (or (map-nested-elt p-message '(videoMessage caption)) "[video]"))
    ((map-elt p-message 'documentMessage) "[document]")
@@ -507,6 +526,73 @@ Displays messages in a two-column format: sender | message."
       (goto-char (point-max)))
 
     (switch-to-buffer chat-buffer)))
+
+(defun chats-app-chat-view-image-at-point ()
+  "View the full image at point in a *ChatsApp photo* buffer."
+  (interactive)
+  (unless (get-text-property (point) 'image-url)
+    (user-error "No image at point"))
+  (message "Downloading image...")
+  (let ((url (get-text-property (point) 'image-url))
+        (direct-path (get-text-property (point) 'image-direct-path))
+        (media-key (get-text-property (point) 'image-media-key))
+        (mimetype (get-text-property (point) 'image-mimetype))
+        (file-enc-sha256 (get-text-property (point) 'image-file-enc-sha256))
+        (file-sha256 (get-text-property (point) 'image-file-sha256))
+        (file-length (get-text-property (point) 'image-file-length))
+        (width (get-text-property (point) 'image-width))
+        (height (get-text-property (point) 'image-height)))
+    (with-current-buffer (chats-app--buffer)
+      (chats-app--send-download-image-request
+       :url url
+       :direct-path direct-path
+       :media-key media-key
+       :mimetype mimetype
+       :file-enc-sha256 file-enc-sha256
+       :file-sha256 file-sha256
+       :file-length file-length
+       :on-success (lambda (response)
+                     (message "Downloading image... done")
+                     (chats-app-chat--display-image-in-buffer
+                      :data-url (map-elt response 'Data)
+                      :mimetype (map-elt response 'Mimetype)
+                      :width width
+                      :height height))
+       :on-failure (lambda (error)
+                     (message "Failed to download image: %s"
+                              (or (map-elt error 'message) "unknown")))))))
+
+(cl-defun chats-app-chat--display-image-in-buffer (&key data-url mimetype width height)
+  "Display image in *ChatsApp photo* buffer.
+DATA-URL is the base64-encoded data URL from the backend.
+MIMETYPE is the image MIME type."
+  (unless data-url
+    (error ":data-url is required"))
+  ;; Extract base64 data from data URL (format: "data:image/jpeg;base64,...")
+  (unless (string-match "data:[^;]+;base64,\\(.*\\)" data-url)
+    (error "Invalid data URL format"))
+  (let* ((base64-data (match-string 1 data-url))
+         (image-data (base64-decode-string base64-data))
+         (image-type (cond
+                      ((string-match "image/jpeg" mimetype) 'jpeg)
+                      ((string-match "image/png" mimetype) 'png)
+                      ((string-match "image/gif" mimetype) 'gif)
+                      ((string-match "image/webp" mimetype) 'imagemagick)
+                      (t 'imagemagick)))
+         (image (create-image image-data image-type t))
+         (photo-buffer (get-buffer-create "*ChatsApp photo*")))
+    (with-current-buffer photo-buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (fundamental-mode)
+        (setq buffer-read-only t)
+        (local-set-key (kbd "q") #'quit-window)
+        (insert (propertize "q" 'face 'help-key-binding) " to close")
+        (insert "\n\n")
+        (insert (propertize "🌄" 'display image))
+        (insert "\n")
+        (goto-char (point-min))))
+    (switch-to-buffer photo-buffer)))
 
 (provide 'chats-app-chat)
 ;;; chats-app-chat.el ends here
