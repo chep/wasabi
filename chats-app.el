@@ -920,10 +920,7 @@ Returns alist with :chat-jid, :display-name, :last-updated, :is-group."
                        (map-elt (cdr contact) :push-name)))))
          (identifier (when (string-match "\\([^@]+\\)@" chat-jid)
                        (match-string 1 chat-jid)))
-         (base-name (or name identifier chat-jid))
-         (display-name (if is-group
-                           (concat "[Group] " base-name)
-                         base-name)))
+         (display-name (or name identifier chat-jid)))
     `((:chat-jid . ,chat-jid)
       (:display-name . ,display-name)
       (:is-group . ,is-group)
