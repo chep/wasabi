@@ -33,6 +33,7 @@
 (eval-when-compile
   (require 'cl-lib))
 (require 'map)
+(require 'parse-time)
 
 (declare-function chats-app--log "chats-app")
 (declare-function chats-app--add-action-to-text "chats-app")
@@ -90,7 +91,7 @@ Returns string like \"Hello\" or \"[image]\"."
    ((map-elt p-message 'extendedTextMessage)
     (map-nested-elt p-message '(extendedTextMessage text)))
    ((map-elt p-message 'imageMessage)
-    (chats-app--log "Image message: %s" p-message)
+    (chats-app--log "Image message arrived")
     (let* ((thumbnail (map-nested-elt p-message '(imageMessage JPEGThumbnail)))
            (image-text (if thumbnail
                            (propertize "[image]" 'display
@@ -121,7 +122,7 @@ Returns string like \"Hello\" or \"[image]\"."
               (when-let ((caption (map-nested-elt p-message '(imageMessage caption))))
                 (concat "\n" caption)))))
    ((map-elt p-message 'videoMessage)
-    (chats-app--log "Video message: %s" p-message)
+    (chats-app--log "Video message arrived")
     (let* ((thumbnail (map-nested-elt p-message '(videoMessage JPEGThumbnail)))
            (video-text (if thumbnail
                            (propertize "[video]" 'display
@@ -513,20 +514,22 @@ MESSAGES is a list of already-parsed internal message alists."
     (chats-app-chat--setup-prompt)
     (goto-char (point-max))))
 
-(cl-defun chats-app-chat--render-message (&key sender-name timestamp content max-sender-width reactions)
+(cl-defun chats-app-chat--render-message (&key sender-name timestamp content max-sender-width reactions message-id)
   "Render a single internal message.
 SENDER-NAME is the display name of the sender.
 TIMESTAMP is the ISO8601 timestamp string.
 CONTENT is the display content (already parsed, may include text properties).
 MAX-SENDER-WIDTH is used for padding alignment.
-REACTIONS is a list of reaction alists with :emoji and :sender keys."
+REACTIONS is a list of reaction alists with :emoji and :sender keys.
+MESSAGE-ID is used to tag the rendered message for later updates."
   (let* ((col1-width max-sender-width)
          (is-from-me (string= sender-name "Me"))
          (sender (propertize sender-name
                              'face `(:inherit ,(if is-from-me
                                                    'font-lock-variable-name-face
                                                  'font-lock-function-name-face) :box nil)
-                             'chats-app-sender t))
+                             'chats-app-sender t
+                             'chats-app-message-id message-id))
          (sender-padding (make-string (max 0 (- (or max-sender-width 0)
                                                 (string-width sender))) ?\s))
          (time (when timestamp
@@ -575,7 +578,8 @@ MESSAGES is a list of alists with :sender-name, :timestamp, :content."
               :timestamp (map-elt msg :timestamp)
               :content (map-elt msg :content)
               :max-sender-width max-sender-width
-              :reactions (map-elt msg :reactions)))
+              :reactions (map-elt msg :reactions)
+              :message-id (map-elt msg :message-id)))
            messages)))
     (let ((start (point)))
       (insert (mapconcat #'identity message-lines "\n\n"))
@@ -613,7 +617,8 @@ Updates :messages list and :max-sender-width in chat state."
                  :timestamp (map-elt message :timestamp)
                  :content (map-elt message :content)
                  :max-sender-width (map-elt chats-app-chat--chat :max-sender-width)
-                 :reactions (map-elt message :reactions)))
+                 :reactions (map-elt message :reactions)
+                 :message-id (map-elt message :message-id)))
         (insert "\n\n")
         (put-text-property start (point) 'read-only t))
       (chats-app-chat--setup-prompt)
@@ -628,6 +633,7 @@ EMOJI is the reaction emoji, SENDER is the name of who reacted.
 Finds the message in :messages, updates it, and re-renders just that message."
   (unless (derived-mode-p 'chats-app-chat-mode)
     (error "Not in a chat buffer"))
+  (chats-app--log "add-reaction called with target-id: %s, emoji: %s, sender: %s" target-id emoji sender)
   (if-let* ((target-idx (seq-position (map-elt chats-app-chat--chat :messages)
                                       target-id
                                       (lambda (msg id) (string= (map-elt msg :message-id) id))))
@@ -639,23 +645,47 @@ Finds the message in :messages, updates it, and re-renders just that message."
                                       (list updated-msg)
                                       (seq-drop (map-elt chats-app-chat--chat :messages) (1+ target-idx)))))
       (progn
+        (chats-app--log "Found message at index %d, message-id: %s" target-idx (map-elt target-msg :message-id))
         (chats-app-chat--update-chat :messages updated-messages)
         (let ((inhibit-read-only t))
           (save-excursion
+            ;; Find message by its message-id text property using text-property-search-forward
+            (chats-app--log "Looking for message-id in buffer: %s" target-id)
             (goto-char (point-min))
-            (dotimes (_ target-idx)
-              (re-search-forward "\n\n" nil t))
-            (when-let ((msg-start (point))
-                       (msg-end (when (re-search-forward "\n\n" nil t)
-                                  (match-beginning 0))))
-              (delete-region msg-start msg-end)
-              (goto-char msg-start)
-              (insert (chats-app-chat--render-message
-                       :sender-name (map-elt updated-msg :sender-name)
-                       :timestamp (map-elt updated-msg :timestamp)
-                       :content (map-elt updated-msg :content)
-                       :max-sender-width (map-elt chats-app-chat--chat :max-sender-width)
-                       :reactions (map-elt updated-msg :reactions)))))))
+            (when-let* ((match (text-property-search-forward 'chats-app-message-id target-id #'equal))
+                        (prop-pos (prop-match-beginning match)))
+              ;; prop-pos is somewhere in the sender text, find the start of the line
+              (goto-char prop-pos)
+              (beginning-of-line)
+              (let* ((msg-start (point))
+                     ;; Find the next message by looking for the next chats-app-sender property
+                     ;; First, move past the current sender property
+                     (after-sender (next-single-property-change prop-pos 'chats-app-sender))
+                     ;; Then find the next sender (start of next message)
+                     (next-sender (when after-sender
+                                    (next-single-property-change after-sender 'chats-app-sender)))
+                     ;; If there's a next message, find its line start; otherwise use prompt marker
+                     (msg-end (if next-sender
+                                  (save-excursion
+                                    (goto-char next-sender)
+                                    (beginning-of-line)
+                                    ;; Skip back over the \n\n separator
+                                    (skip-chars-backward "\n")
+                                    (point))
+                                ;; Last message: stop at prompt marker (or point-max if no prompt)
+                                (or chats-app-chat--prompt-marker (point-max)))))
+                (delete-region msg-start msg-end)
+                (goto-char msg-start)
+                (insert (chats-app-chat--render-message
+                         :sender-name (map-elt updated-msg :sender-name)
+                         :timestamp (map-elt updated-msg :timestamp)
+                         :content (map-elt updated-msg :content)
+                         :max-sender-width (map-elt chats-app-chat--chat :max-sender-width)
+                         :reactions (map-elt updated-msg :reactions)
+                         :message-id (map-elt updated-msg :message-id)))
+                ;; Ensure newline before prompt.
+                (unless next-sender
+                  (insert "\n\n")))))))
     (chats-app--log "Could not find message with ID %s to add reaction" target-id)))
 
 (cl-defun chats-app-chat--start (&key chat-jid messages contact-name)
