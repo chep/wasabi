@@ -43,6 +43,13 @@
 (declare-function chats-app--send-download-video-request "chats-app")
 (declare-function chats-app--send-download-image-request "chats-app")
 
+(cl-defun chats-app-chat--make-chat (&key chat-jid contact-name max-sender-width messages)
+  "Create a chat alist with CHAT-JID, CONTACT-NAME, MAX-SENDER-WIDTH, and MESSAGES."
+  (list (cons :chat-jid chat-jid)
+        (cons :contact-name contact-name)
+        (cons :max-sender-width (or max-sender-width 0))
+        (cons :messages (or messages nil))))
+
 (defvar-local chats-app-chat--chat (chats-app-chat--make-chat)
   "Alist containing chat information for this buffer.
 Keys:
@@ -55,13 +62,6 @@ Keys:
 
 (defvar-local chats-app-chat--input-start-marker nil
   "Marker for the start of user input.")
-
-(cl-defun chats-app-chat--make-chat (&key chat-jid contact-name max-sender-width messages)
-  "Create a chat alist with CHAT-JID, CONTACT-NAME, MAX-SENDER-WIDTH, and MESSAGES."
-  (list (cons :chat-jid chat-jid)
-        (cons :contact-name contact-name)
-        (cons :max-sender-width (or max-sender-width 0))
-        (cons :messages (or messages nil))))
 
 (defun chats-app-chat--update-chat (key value)
   "Update KEY in chats-app-chat--chat with VALUE, preserving other keys."
