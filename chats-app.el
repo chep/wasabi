@@ -979,18 +979,21 @@ With prefix argument, prompt for a phone number to chat with directly."
                (chat-lines
                 (mapcar
                  (lambda (chat)
-                   (let* ((name-width (string-width (map-elt chat :display-name)))
+                   (let* ((display-name (map-elt chat :display-name))
+                          (is-group (map-elt chat :is-group))
+                          (name-width (string-width display-name))
                           (padding (make-string (- max-name-width name-width) ?\s))
-                          (line (format "%s%s"
-                                        (map-elt chat :display-name)
-                                        padding)))
+                          (line (concat display-name
+                                        padding
+                                        (when is-group
+                                          (propertize " (group)" 'face 'font-lock-comment-face)))))
                      (chats-app--add-action-to-text
                       line
                       (lambda ()
                         (interactive)
                         (chats-app--send-chat-history-request
                          :chat-jid (map-elt chat :chat-jid)
-                         :contact-name (map-elt chat :display-name))))))
+                         :contact-name display-name)))))
                  chats-index)))
           (let ((inhibit-read-only t))
             (erase-buffer)
