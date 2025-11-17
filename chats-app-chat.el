@@ -95,9 +95,13 @@ Returns string like \"Hello\" or \"[image]\"."
     (let* ((thumbnail (map-nested-elt p-message '(imageMessage JPEGThumbnail)))
            (image-text (if thumbnail
                            (propertize "[image]" 'display
-                                       (create-image (base64-decode-string thumbnail)
-                                                     'jpeg t
-                                                     :max-width 120 :max-height 120))
+                                       (chats-app-chat--create-rounded-image
+                                        :image-data (base64-decode-string thumbnail)
+                                        :image-type 'jpeg
+                                        :max-width 50
+                                        :max-height 50
+                                        :corner-radius 6
+                                        :padding-vertical 10))
                          "[image]")))
       ;; Store metadata as text properties
       (add-text-properties 0 (length image-text)
@@ -126,9 +130,13 @@ Returns string like \"Hello\" or \"[image]\"."
     (let* ((thumbnail (map-nested-elt p-message '(videoMessage JPEGThumbnail)))
            (video-text (if thumbnail
                            (propertize "[video]" 'display
-                                       (create-image (base64-decode-string thumbnail)
-                                                     'jpeg t
-                                                     :max-width 120 :max-height 120))
+                                       (chats-app-chat--create-rounded-image
+                                        :image-data (base64-decode-string thumbnail)
+                                        :image-type 'jpeg
+                                        :max-width 50
+                                        :max-height 50
+                                        :corner-radius 6
+                                        :padding-vertical 10))
                          "[video]")))
       ;; Store metadata as text properties
       (add-text-properties 0 (length video-text)
@@ -868,6 +876,37 @@ MIMETYPE is the image MIME type."
         (insert "\n")
         (goto-char (point-min))))
     (switch-to-buffer photo-buffer)))
+
+(cl-defun chats-app-chat--create-rounded-image (&key image-data image-type max-width max-height corner-radius padding-horizontal padding-vertical)
+  "Create an SVG image with rounded corners containing IMAGE-DATA.
+IMAGE-DATA is the raw image data.
+IMAGE-TYPE is the image type (jpeg, png, etc.).
+MAX-WIDTH and MAX-HEIGHT are the maximum dimensions (excluding padding).
+CORNER-RADIUS is the radius for rounded corners.
+PADDING-HORIZONTAL is the left/right padding (default 0).
+PADDING-VERTICAL is the top/bottom padding (default 0)."
+  (let* ((base64-data (base64-encode-string image-data))
+         (h-pad (or padding-horizontal 0))
+         (v-pad (or padding-vertical 0))
+         (clip-id "rounded")
+         (svg-template (format
+                        "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"%d\" height=\"%d\">
+  <defs>
+    <clipPath id=\"%s\">
+      <rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\" rx=\"%d\" ry=\"%d\"/>
+    </clipPath>
+  </defs>
+  <g transform=\"translate(%d,%d)\" clip-path=\"url(#%s)\">
+    <image xlink:href=\"data:image/%s;base64,%s\" x=\"0\" y=\"0\" width=\"%d\" height=\"%d\"/>
+  </g>
+</svg>"
+                        (+ max-width (* 2 h-pad)) (+ max-height (* 2 v-pad))
+                        clip-id
+                        max-width max-height corner-radius corner-radius
+                        h-pad v-pad clip-id
+                        (symbol-name image-type) base64-data
+                        max-width max-height)))
+    (create-image svg-template 'svg t)))
 
 (provide 'chats-app-chat)
 ;;; chats-app-chat.el ends here
