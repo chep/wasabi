@@ -824,31 +824,55 @@ Error if not found."
           (groups (map-elt (chats-app--state) :groups)))
       (unless (or contacts groups)
         (user-error "No contacts or groups available"))
-      (if-let* ((available-chats
-                 (append
-                  ;; Add contacts
-                  (mapcar (lambda (contact-entry)
-                            (let* ((jid (symbol-name (car contact-entry)))
-                                   (full-name (map-elt (cdr contact-entry) :full-name))
-                                   (push-name (map-elt (cdr contact-entry) :push-name))
-                                   (display-name (or (and full-name (not (string-empty-p full-name)) full-name)
-                                                     (and push-name (not (string-empty-p push-name)) push-name)
-                                                     jid)))
-                              (cons display-name jid)))
-                          contacts)
-                  ;; Add groups
-                  (mapcar (lambda (group-entry)
-                            (let* ((jid (symbol-name (car group-entry)))
-                                   (group-info (cdr group-entry))
-                                   (group-name (map-elt group-info :name))
-                                   (display-name (or (and group-name (not (string-empty-p group-name)) group-name)
-                                                     jid)))
-                              (cons display-name jid)))
-                          groups)))
-                (selected-jid (map-elt available-chats (completing-read "New chat with: " available-chats nil t))))
-          (chats-app--send-chat-history-request
-           :chat-jid selected-jid)
-        (user-error "No contact or group found")))))
+      (let* ((contact-entries
+              (mapcar (lambda (contact-entry)
+                        (let* ((jid (symbol-name (car contact-entry)))
+                               (full-name (map-elt (cdr contact-entry) :full-name))
+                               (push-name (map-elt (cdr contact-entry) :push-name))
+                               (display-name (or (and full-name (not (string-empty-p full-name)) full-name)
+                                                 (and push-name (not (string-empty-p push-name)) push-name)
+                                                 jid)))
+                          `((:display-name . ,display-name)
+                            (:jid . ,jid)
+                            (:is-group . nil))))
+                      contacts))
+             (group-entries
+              (mapcar (lambda (group-entry)
+                        (let* ((jid (symbol-name (car group-entry)))
+                               (group-info (cdr group-entry))
+                               (group-name (map-elt group-info :name))
+                               (display-name (or (and group-name (not (string-empty-p group-name)) group-name)
+                                                 jid)))
+                          `((:display-name . ,display-name)
+                            (:jid . ,jid)
+                            (:is-group . t))))
+                      groups))
+             (all-entries
+              (sort
+               (seq-filter
+                (lambda (entry)
+                  ;; Filter out unknown groups or numbers
+                  (and (not (string-suffix-p "@lid" (map-elt entry :display-name)))
+                       (not (string-suffix-p "@g.us" (map-elt entry :display-name)))))
+                (append contact-entries group-entries))
+               (lambda (a b) (string< (map-elt a :display-name) (map-elt b :display-name)))))
+             (max-width (apply #'max (mapcar (lambda (entry) (string-width (map-elt entry :display-name))) all-entries)))
+             (display-alist
+              (mapcar (lambda (entry)
+                        ;; return list of (label . jid)
+                        (cons (if (map-elt entry :is-group)
+                                  (concat (map-elt entry :display-name)
+                                          ;; Pad using longest contact name.
+                                          (make-string (- max-width (string-width (map-elt entry :display-name))) ?\s)
+                                          " (group)")
+                                (map-elt entry :display-name))
+                              (map-elt entry :jid)))
+                      all-entries)))
+        (if-let ((selected-label (completing-read "Chat with: " display-alist nil t))
+                 (selected-jid (cdr (assoc selected-label display-alist))))
+            (chats-app--send-chat-history-request
+             :chat-jid selected-jid)
+          (user-error "No contact or group found"))))))
 
 (defalias 'chats-app-new-message #'chats-app-new-chat)
 
