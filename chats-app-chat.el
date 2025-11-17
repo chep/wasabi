@@ -862,7 +862,6 @@ MIMETYPE is the image MIME type."
                       ((string-match "image/gif" mimetype) 'gif)
                       ((string-match "image/webp" mimetype) 'imagemagick)
                       (t 'imagemagick)))
-         (image (create-image image-data image-type t))
          (photo-buffer (get-buffer-create "*ChatsApp photo*")))
     (with-current-buffer photo-buffer
       (let ((inhibit-read-only t))
@@ -871,11 +870,31 @@ MIMETYPE is the image MIME type."
         (setq buffer-read-only t)
         (local-set-key (kbd "q") #'quit-window)
         (insert (propertize "q" 'face 'help-key-binding) " to close")
-        (insert "\n\n")
-        (insert (propertize "🌄" 'display image))
-        (insert "\n")
-        (goto-char (point-min))))
-    (switch-to-buffer photo-buffer)))
+        (insert "\n\n")))
+    (switch-to-buffer photo-buffer)
+    ;; Calculate max dimensions based on window size (after switching to buffer)
+    (let* ((win-width (window-pixel-width))
+           (win-height (window-pixel-height))
+           ;; Reserve some space for the header text
+           (max-height (- win-height 60))
+           (max-width win-width)
+           ;; Create initial image to get actual dimensions
+           (temp-image (create-image image-data image-type t))
+           (image-size (image-size temp-image t))
+           (actual-width (car image-size))
+           (actual-height (cdr image-size))
+           ;; Calculate scale factor to fit window
+           (scale-x (/ (float max-width) actual-width))
+           (scale-y (/ (float max-height) actual-height))
+           (scale (min scale-x scale-y 1.0))
+           ;; Create final scaled image
+           (image (create-image image-data image-type t :scale scale)))
+      (with-current-buffer photo-buffer
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (insert (propertize "🌄" 'display image))
+          (insert "\n")
+          (goto-char (point-min)))))))
 
 (cl-defun chats-app-chat--create-rounded-image (&key image-data image-type max-width max-height corner-radius padding-top padding-bottom padding-leading padding-trailing is-video)
   "Create an SVG image with rounded corners containing IMAGE-DATA.
