@@ -971,29 +971,25 @@ With prefix argument, prompt for a phone number to chat with directly."
       (cond
        ;; If we have chats and no blocking status message, display chat list
        ((and chats-index (not message))
-        (let* (;; chats-index is already parsed and sorted, just need to format for display
-               (max-name-width (apply #'max
+        (let* ((max-name-width (apply #'max
                                       (mapcar (lambda (chat) (string-width (map-elt chat :display-name)))
                                               chats-index)))
                ;; Format with aligned columns and add actions
                (chat-lines
                 (mapcar
                  (lambda (chat)
-                   (let* ((display-name (map-elt chat :display-name))
-                          (is-group (map-elt chat :is-group))
-                          (name-width (string-width display-name))
-                          (padding (make-string (- max-name-width name-width) ?\s))
-                          (line (concat display-name
-                                        padding
-                                        (when is-group
-                                          (propertize " (group)" 'face 'font-lock-comment-face)))))
-                     (chats-app--add-action-to-text
-                      line
-                      (lambda ()
-                        (interactive)
-                        (chats-app--send-chat-history-request
-                         :chat-jid (map-elt chat :chat-jid)
-                         :contact-name display-name)))))
+                   (chats-app--add-action-to-text
+                    ;; Recent contact line
+                    (concat (map-elt chat :display-name)
+                            ;; padding
+                            (make-string (- max-name-width (string-width (map-elt chat :display-name))) ?\s)
+                            (when (map-elt chat :is-group)
+                              (propertize " (group)" 'face 'font-lock-comment-face)))
+                    (lambda ()
+                      (interactive)
+                      (chats-app--send-chat-history-request
+                       :chat-jid (map-elt chat :chat-jid)
+                       :contact-name (map-elt chat :display-name)))))
                  chats-index)))
           (let ((inhibit-read-only t))
             (erase-buffer)
