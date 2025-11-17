@@ -857,7 +857,7 @@ Error if not found."
                 (append contact-entries group-entries))
                (lambda (a b) (string< (map-elt a :display-name) (map-elt b :display-name)))))
              (max-width (apply #'max (mapcar (lambda (entry) (string-width (map-elt entry :display-name))) all-entries)))
-             (display-alist
+             (candidates
               (mapcar (lambda (entry)
                         ;; return list of (label . jid)
                         (cons (if (map-elt entry :is-group)
@@ -868,10 +868,16 @@ Error if not found."
                                 (map-elt entry :display-name))
                               (map-elt entry :jid)))
                       all-entries)))
-        (if-let ((selected-label (completing-read "Chat with: " display-alist nil t))
-                 (selected-jid (cdr (assoc selected-label display-alist))))
+        (if-let* ((selected-label (completing-read "Chat with: " candidates nil t))
+                  (selected-jid (cdr (assoc selected-label candidates)))
+                  (selected-entry (seq-find (lambda (entry)
+                                              (string= (map-elt entry :jid) selected-jid))
+                                            all-entries)))
             (chats-app--send-chat-history-request
-             :chat-jid selected-jid)
+             :chat-jid selected-jid
+             :contact-name (concat (map-elt selected-entry :display-name)
+                                   (when (map-elt selected-entry :is-group)
+                                     " (group)")))
           (user-error "No contact or group found"))))))
 
 (defalias 'chats-app-new-message #'chats-app-new-chat)
