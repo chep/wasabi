@@ -101,7 +101,8 @@ Returns string like \"Hello\" or \"[image]\"."
                                         :max-width 50
                                         :max-height 50
                                         :corner-radius 6
-                                        :padding-vertical 10))
+                                        :padding-top 5
+                                        :padding-bottom 5))
                          "[image]")))
       ;; Store metadata as text properties
       (add-text-properties 0 (length image-text)
@@ -136,7 +137,8 @@ Returns string like \"Hello\" or \"[image]\"."
                                         :max-width 50
                                         :max-height 50
                                         :corner-radius 6
-                                        :padding-vertical 10))
+                                        :padding-top 5
+                                        :padding-bottom 5))
                          "[video]")))
       ;; Store metadata as text properties
       (add-text-properties 0 (length video-text)
@@ -877,18 +879,22 @@ MIMETYPE is the image MIME type."
         (goto-char (point-min))))
     (switch-to-buffer photo-buffer)))
 
-(cl-defun chats-app-chat--create-rounded-image (&key image-data image-type max-width max-height corner-radius padding-horizontal padding-vertical)
+(cl-defun chats-app-chat--create-rounded-image (&key image-data image-type max-width max-height corner-radius padding-top padding-bottom padding-leading padding-trailing)
   "Create an SVG image with rounded corners containing IMAGE-DATA.
 IMAGE-DATA is the raw image data.
 IMAGE-TYPE is the image type (jpeg, png, etc.).
 MAX-WIDTH and MAX-HEIGHT are the maximum dimensions (excluding padding).
 CORNER-RADIUS is the radius for rounded corners.
-PADDING-HORIZONTAL is the left/right padding (default 0).
-PADDING-VERTICAL is the top/bottom padding (default 0)."
+PADDING-TOP is the top padding (default 0).
+PADDING-BOTTOM is the bottom padding (default 0).
+PADDING-LEADING is the left padding (default 0).
+PADDING-TRAILING is the right padding (default 0)."
   (let* ((base64-data (base64-encode-string image-data))
-         (h-pad (or padding-horizontal 0))
-         (v-pad (or padding-vertical 0))
-         (clip-id "rounded")
+         (pad-top (or padding-top 0))
+         (pad-bottom (or padding-bottom 0))
+         (pad-leading (or padding-leading 0))
+         (pad-trailing (or padding-trailing 0))
+         (clip-id "rounded-1")
          (svg-template (format
                         "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"%d\" height=\"%d\">
   <defs>
@@ -900,10 +906,10 @@ PADDING-VERTICAL is the top/bottom padding (default 0)."
     <image xlink:href=\"data:image/%s;base64,%s\" x=\"0\" y=\"0\" width=\"%d\" height=\"%d\"/>
   </g>
 </svg>"
-                        (+ max-width (* 2 h-pad)) (+ max-height (* 2 v-pad))
+                        (+ max-width pad-leading pad-trailing) (+ max-height pad-top pad-bottom)
                         clip-id
                         max-width max-height corner-radius corner-radius
-                        h-pad v-pad clip-id
+                        pad-leading pad-top clip-id
                         (symbol-name image-type) base64-data
                         max-width max-height)))
     (create-image svg-template 'svg t)))
