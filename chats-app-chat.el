@@ -183,10 +183,10 @@ CONTACT-NAME is an optional fallback name."
    ((map-nested-elt p-data '(Info IsFromMe))
     "Me")
    ((and p-sender-jid contacts
-         (assoc (intern p-sender-jid) contacts))
-    (let* ((contact (assoc (intern p-sender-jid) contacts))
-           (full-name (map-elt (cdr contact) :full-name))
-           (push-name (map-elt (cdr contact) :push-name)))
+         (map-elt contacts (intern p-sender-jid)))
+    (let* ((contact (map-elt contacts (intern p-sender-jid)))
+           (full-name (map-elt contact :full-name))
+           (push-name (map-elt contact :push-name)))
       (or (and full-name (not (string-empty-p full-name)) full-name)
           (and push-name (not (string-empty-p push-name)) push-name))))
    (t

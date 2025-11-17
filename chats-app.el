@@ -899,7 +899,7 @@ Error if not found."
                               (map-elt entry :jid)))
                       all-entries)))
         (if-let* ((selected-label (completing-read "Chat with: " candidates nil t))
-                  (selected-jid (cdr (assoc selected-label candidates)))
+                  (selected-jid (map-elt candidates selected-label))
                   (selected-entry (seq-find (lambda (entry)
                                               (string= (map-elt entry :jid) selected-jid))
                                             all-entries)))
@@ -1016,12 +1016,11 @@ Returns alist with :chat-jid, :display-name, :last-updated, :is-group."
          (is-group (string-match "@g\\.us$" chat-jid))
          (name (if is-group
                    ;; TODO: Do we need symbols here? Why not keep as string?
-                   (when-let ((group (assoc (intern chat-jid) groups)))
-                     (map-elt (cdr group) :name))
+                   (map-nested-elt groups (list (intern chat-jid) :name))
                  ;; For contacts, look up in contacts list
-                 (when-let ((contact (assoc (intern chat-jid) contacts)))
-                   (or (map-elt (cdr contact) :full-name)
-                       (map-elt (cdr contact) :push-name)))))
+                 (when-let ((contact (map-elt contacts (intern chat-jid))))
+                   (or (map-elt contact :full-name)
+                       (map-elt contact :push-name)))))
          (identifier (when (string-match "\\([^@]+\\)@" chat-jid)
                        (match-string 1 chat-jid)))
          (display-name (or name identifier chat-jid)))
