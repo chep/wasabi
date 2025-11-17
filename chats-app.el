@@ -792,8 +792,9 @@ FACE when non-nil applies the specified face to the text."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "n") #'next-line)
     (define-key map (kbd "p") #'previous-line)
-    (define-key map (kbd "c") #'chats-app-new-chat)
     (define-key map (kbd "C") #'chats-app-new-chat)
+    (define-key map (kbd "c") #'chats-app-new-chat)
+    (define-key map (kbd "+") #'chats-app-new-chat-new-number)
     (define-key map (kbd "q") #'chats-app-quit)
     (define-key map (kbd "g") #'chats-app-reload)
     map)
@@ -880,13 +881,27 @@ Error if not found."
     (setq chats-app--state nil)
     (chats-app--initialize :home-buffer home-buffer)))
 
-(defun chats-app-new-chat ()
-  "Select a contact or group using completing-read and open the chat."
+(defun chats-app-new-chat-new-number ()
+  "Start a new chat with a new phone number."
   (interactive)
+  (let ((current-prefix-arg t))
+    (call-interactively #'chats-app-new-chat)))
+
+(defun chats-app-new-chat (new-number)
+  "Select a contact or group using completing-read and open the chat.
+With prefix argument, prompt for a phone number to chat with directly."
+  (interactive
+   (list (when current-prefix-arg
+           (read-string "Phone number (with country code, e.g., 447123456789): "))))
   (with-current-buffer (chats-app--buffer)
-    (let ((contacts (map-elt (chats-app--state) :contacts))
-          (groups (map-elt (chats-app--state) :groups)))
-      (unless (or contacts groups)
+    (if new-number
+        ;; Direct phone number chat
+        (chats-app--send-chat-history-request
+         :chat-jid (concat new-number "@s.whatsapp.net")
+         :contact-name (string-trim new-number))
+      ;; Normal contact/group selection
+      (unless (or (map-elt (chats-app--state) :contacts)
+                  (map-elt (chats-app--state) :groups))
         (user-error "No contacts or groups available"))
       (let* ((contact-entries
               (mapcar (lambda (contact-entry)
@@ -899,7 +914,7 @@ Error if not found."
                           `((:display-name . ,display-name)
                             (:jid . ,jid)
                             (:is-group . nil))))
-                      contacts))
+                      (map-elt (chats-app--state) :contacts)))
              (group-entries
               (mapcar (lambda (group-entry)
                         (let* ((jid (symbol-name (car group-entry)))
@@ -910,7 +925,7 @@ Error if not found."
                           `((:display-name . ,display-name)
                             (:jid . ,jid)
                             (:is-group . t))))
-                      groups))
+                      (map-elt (chats-app--state) :groups)))
              (all-entries
               (sort
                (seq-filter
