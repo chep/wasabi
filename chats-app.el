@@ -960,6 +960,11 @@ With prefix argument, prompt for a phone number to chat with directly."
                                      " (group)")))
           (user-error "No contact or group found"))))))
 
+(defun chats-app-open-data-directory ()
+  "Open data directory (database, media, etc)."
+  (interactive)
+  (find-file chats-app-data-dir))
+
 (defalias 'chats-app-new-message #'chats-app-new-chat)
 
 (defun chats-app--refresh ()
