@@ -377,14 +377,20 @@ Shows different bindings depending on whether point is in input area."
                   (chats-app-chat--get-binding-string #'chats-app-chat-send-input)
                   " to send message"))
              ;; Outside input area
-             (mapconcat
-              #'identity
-              (list
-               (concat (chats-app-chat--get-binding-string #'chats-app-chat-next-message) " next")
-               (concat (chats-app-chat--get-binding-string #'chats-app-chat-previous-message) " previous")
-               (concat (chats-app-chat--get-binding-string #'chats-app-chat-refresh) " refresh")
-               (concat (chats-app-chat--get-binding-string #'chats-app-chat-quit) " quit"))
-              " "))))))
+             (concat
+              (when has-actionables
+                (concat
+                 (chats-app-chat--get-binding-string #'chats-app-chat-previous-actionable)
+                 "/"
+                 (chats-app-chat--get-binding-string #'chats-app-chat-next-actionable)
+                 "/"))
+              (chats-app-chat--get-binding-string #'chats-app-chat-next-message)
+              "/"
+              (chats-app-chat--get-binding-string #'chats-app-chat-previous-message)
+              " navigation "
+              (chats-app-chat--get-binding-string #'chats-app-chat-refresh)
+              " refresh "
+              (chats-app-chat--get-binding-string #'chats-app-chat-quit) " quit"))))))
 
 (defun chats-app-chat--setup-prompt ()
   "Set up the read-only prompt at the end of the buffer."
