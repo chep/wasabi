@@ -68,6 +68,21 @@ If the directory does not exist, it will be created automatically."
   :type 'directory
   :group 'wasabi)
 
+(defcustom wasabi-video-player-function nil
+  "Function to open video files for viewing.
+
+If nil, uses the default system player via `wasabi-chat--open-video-externally'.
+If set to a function, it will be called with one argument: the absolute path
+to the video file.
+
+Example:
+  (setq wasabi-video-player-function
+        (lambda (file)
+          (start-process \"mpv\" nil \"mpv\" file)))"
+  :type '(choice (const :tag "Use system default" nil)
+                 (function :tag "Custom function"))
+  :group 'wasabi)
+
 (defun wasabi-data-dir ()
   "Return the data directory, ensuring it exists.
 Creates the directory if it doesn't exist.
@@ -399,6 +414,7 @@ Calls ON-FAILURE with error if download fails."
     (error "Not in a chats buffer"))
   (unless url
     (error ":url is required"))
+  (wasabi--log "Downloading image...")
   (acp-send-request :client (map-elt (wasabi--state) :client)
                     :request (wasabi--make-download-image-request
                               :token wasabi-user-token
@@ -411,10 +427,11 @@ Calls ON-FAILURE with error if download fails."
                               :file-length file-length)
                     :on-success (or on-success
                                     (lambda (_response)
-                                      (message "Image downloaded")))
+                                      (wasabi--log "Image downloaded")))
                     :on-failure (or on-failure
                                     (lambda (error)
-                                      (message "Failed to download image: %s" (or (map-elt error 'message) "unknown"))))))
+                                      (wasabi--log "Failed to download image: %s"
+                                                   (or (map-elt error 'message) "unknown"))))))
 
 (cl-defun wasabi--send-download-video-request (&key url direct-path media-key mimetype
                                                     file-enc-sha256 file-sha256 file-length
@@ -426,6 +443,7 @@ Calls ON-FAILURE with error if download fails."
     (error "Not in a chats buffer"))
   (unless url
     (error ":url is required"))
+  (wasabi--log "Downloading video")
   (acp-send-request :client (map-elt (wasabi--state) :client)
                     :request (wasabi--make-download-video-request
                               :token wasabi-user-token
@@ -438,10 +456,11 @@ Calls ON-FAILURE with error if download fails."
                               :file-length file-length)
                     :on-success (or on-success
                                     (lambda (_response)
-                                      (message "Video downloaded")))
+                                      (wasabi--log "Video downloaded")))
                     :on-failure (or on-failure
                                     (lambda (error)
-                                      (message "Failed to download video: %s" (or (map-elt error 'message) "unknown"))))))
+                                      (wasabi--log "Failed to download video: %s"
+                                                   (or (map-elt error 'message) "unknown"))))))
 
 (cl-defun wasabi--make-session-disconnect-request (&key token)
   "Instantiate a \"session.disconnect\" request.

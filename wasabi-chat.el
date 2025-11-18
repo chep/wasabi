@@ -865,8 +865,7 @@ Displays messages in a two-column format: sender | message."
                         :mimetype mimetype
                         :file-sha256 file-sha256))
          :on-failure (lambda (error)
-                       (message "Failed to download video: %s"
-                                (or (map-elt error 'message) "unknown"))))))))
+                       (message "Failed to download video")))))))
 
 (cl-defun wasabi-chat--save-and-play-video (&key data-url mimetype file-sha256)
   "Save video to media directory and open with external player.
@@ -903,20 +902,22 @@ FILE-SHA256 is used to create a unique filename."
     (wasabi-chat--open-video-externally temp-file)))
 
 (defun wasabi-chat--open-video-externally (file-path)
-  "Open video FILE-PATH with system default player."
-  (cond
-   ;; macOS
-   ((eq system-type 'darwin)
-    (start-process "open-video" nil "open" file-path))
-   ;; Linux
-   ((eq system-type 'gnu/linux)
-    (start-process "open-video" nil "xdg-open" file-path))
-   ;; Windows
-   ((memq system-type '(windows-nt ms-dos))
-    (start-process "open-video" nil "cmd" "/c" "start" "" file-path))
-   ;; Fallback
-   (t
-    (browse-url-of-file file-path))))
+  "Open video FILE-PATH with configured or system default player."
+  (if wasabi-video-player-function
+      (funcall wasabi-video-player-function file-path)
+    (cond
+     ;; macOS
+     ((eq system-type 'darwin)
+      (start-process "open-video" nil "open" file-path))
+     ;; Linux
+     ((eq system-type 'gnu/linux)
+      (start-process "open-video" nil "xdg-open" file-path))
+     ;; Windows
+     ((memq system-type '(windows-nt ms-dos))
+      (start-process "open-video" nil "cmd" "/c" "start" "" file-path))
+     ;; Fallback
+     (t
+      (browse-url-of-file file-path)))))
 
 (defun wasabi-chat-view-image-at-point ()
   "View the full image at point in a *Wasabi photo* buffer."
@@ -970,8 +971,7 @@ FILE-SHA256 is used to create a unique filename."
                         :width width
                         :height height))
          :on-failure (lambda (error)
-                       (message "Failed to download image: %s"
-                                (or (map-elt error 'message) "unknown"))))))))
+                       (message "Failed to download image")))))))
 
 (cl-defun wasabi-chat--display-cached-image (file-path width height)
   "Display cached image from FILE-PATH."
