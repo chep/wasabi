@@ -1,9 +1,9 @@
-;;; chats-app-chat.el --- Chat buffer for chats-app  -*- lexical-binding: t; -*-
+;;; wasabi-chat.el --- Chat buffer for wasabi  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2024 Alvaro Ramirez
 
 ;; Author: Alvaro Ramirez https://xenodium.com
-;; URL: https://github.com/xenodium/chats-app
+;; URL: https://github.com/xenodium/wasabi
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))
 
@@ -24,7 +24,7 @@
 
 ;;; Commentary:
 
-;; chats-app-chat provides the chat buffer functionality for chats-app,
+;; wasabi-chat provides the chat buffer functionality for wasabi,
 ;; handling the display and interaction with individual WhatsApp
 ;; conversations.
 
@@ -35,56 +35,56 @@
 (require 'map)
 (require 'parse-time)
 
-(declare-function chats-app--log "chats-app")
-(declare-function chats-app--add-action-to-text "chats-app")
-(declare-function chats-app--buffer "chats-app")
-(declare-function chats-app--send-chat-send-text-request "chats-app")
-(declare-function chats-app--send-chat-history-request "chats-app")
-(declare-function chats-app--send-download-video-request "chats-app")
-(declare-function chats-app--send-download-image-request "chats-app")
+(declare-function wasabi--log "wasabi")
+(declare-function wasabi--add-action-to-text "wasabi")
+(declare-function wasabi--buffer "wasabi")
+(declare-function wasabi--send-chat-send-text-request "wasabi")
+(declare-function wasabi--send-chat-history-request "wasabi")
+(declare-function wasabi--send-download-video-request "wasabi")
+(declare-function wasabi--send-download-image-request "wasabi")
 
-(cl-defun chats-app-chat--make-chat (&key chat-jid contact-name max-sender-width messages)
+(cl-defun wasabi-chat--make-chat (&key chat-jid contact-name max-sender-width messages)
   "Create a chat alist with CHAT-JID, CONTACT-NAME, MAX-SENDER-WIDTH, and MESSAGES."
   (list (cons :chat-jid chat-jid)
         (cons :contact-name contact-name)
         (cons :max-sender-width (or max-sender-width 0))
         (cons :messages (or messages nil))))
 
-(defvar-local chats-app-chat--chat (chats-app-chat--make-chat)
+(defvar-local wasabi-chat--chat (wasabi-chat--make-chat)
   "Alist containing chat information for this buffer.
 Keys:
   :chat-jid - The chat JID
   :contact-name - The contact name
   :max-sender-width - Maximum sender name width for alignment")
 
-(defvar-local chats-app-chat--prompt-marker nil
+(defvar-local wasabi-chat--prompt-marker nil
   "Marker for the start of the prompt.")
 
-(defvar-local chats-app-chat--input-start-marker nil
+(defvar-local wasabi-chat--input-start-marker nil
   "Marker for the start of user input.")
 
-(defun chats-app-chat--update-chat (key value)
-  "Update KEY in chats-app-chat--chat with VALUE, preserving other keys."
-  (setq chats-app-chat--chat
+(defun wasabi-chat--update-chat (key value)
+  "Update KEY in wasabi-chat--chat with VALUE, preserving other keys."
+  (setq wasabi-chat--chat
         (cons (cons key value)
-              (assq-delete-all key chats-app-chat--chat))))
+              (assq-delete-all key wasabi-chat--chat))))
 
-(defvar-keymap chats-app-chat-mode-map
-  :doc "Keymap for `chats-app-chat-mode'."
-  "q" #'chats-app-chat-quit
-  "n" #'chats-app-chat-next-message
-  "p" #'chats-app-chat-previous-message
-  "g" #'chats-app-chat-refresh
-  "RET" #'chats-app-chat-send-input
-  "C-a" #'chats-app-chat-beginning-of-line
-  "TAB" #'chats-app-chat-next-actionable
-  "S-TAB" #'chats-app-chat-previous-actionable
-  "<tab>" #'chats-app-chat-next-actionable
-  "<backtab>" #'chats-app-chat-previous-actionable)
+(defvar-keymap wasabi-chat-mode-map
+  :doc "Keymap for `wasabi-chat-mode'."
+  "q" #'wasabi-chat-quit
+  "n" #'wasabi-chat-next-message
+  "p" #'wasabi-chat-previous-message
+  "g" #'wasabi-chat-refresh
+  "RET" #'wasabi-chat-send-input
+  "C-a" #'wasabi-chat-beginning-of-line
+  "TAB" #'wasabi-chat-next-actionable
+  "S-TAB" #'wasabi-chat-previous-actionable
+  "<tab>" #'wasabi-chat-next-actionable
+  "<backtab>" #'wasabi-chat-previous-actionable)
 
 ;; Parsing functions - convert protocol structures to internal format
 
-(defun chats-app-chat--parse-content (p-message)
+(defun wasabi-chat--parse-content (p-message)
   "Parse displayable content from protocol P-MESSAGE structure.
 Returns string like \"Hello\" or \"[image]\"."
   (cond
@@ -93,11 +93,11 @@ Returns string like \"Hello\" or \"[image]\"."
    ((map-elt p-message 'extendedTextMessage)
     (map-nested-elt p-message '(extendedTextMessage text)))
    ((map-elt p-message 'imageMessage)
-    (chats-app--log "Image message arrived")
+    (wasabi--log "Image message arrived")
     (let* ((thumbnail (map-nested-elt p-message '(imageMessage JPEGThumbnail)))
            (image-text (if thumbnail
                            (propertize "[image]" 'display
-                                       (chats-app-chat--create-rounded-image
+                                       (wasabi-chat--create-rounded-image
                                         :image-data (base64-decode-string thumbnail)
                                         :image-type 'jpeg
                                         :max-width 50
@@ -120,20 +120,20 @@ Returns string like \"Hello\" or \"[image]\"."
                                        image-thumbnail ,thumbnail)
                            image-text)
       ;; Add action to view image on RET
-      (setq image-text (chats-app--add-action-to-text
+      (setq image-text (wasabi--add-action-to-text
                         image-text
                         (lambda ()
                           (interactive)
-                          (chats-app-chat-view-image-at-point))))
+                          (wasabi-chat-view-image-at-point))))
       (concat image-text
               (when-let ((caption (map-nested-elt p-message '(imageMessage caption))))
                 (concat "\n" caption)))))
    ((map-elt p-message 'videoMessage)
-    (chats-app--log "Video message arrived")
+    (wasabi--log "Video message arrived")
     (let* ((thumbnail (map-nested-elt p-message '(videoMessage JPEGThumbnail)))
            (video-text (if thumbnail
                            (propertize "[video]" 'display
-                                       (chats-app-chat--create-rounded-image
+                                       (wasabi-chat--create-rounded-image
                                         :image-data (base64-decode-string thumbnail)
                                         :image-type 'jpeg
                                         :max-width 50
@@ -157,11 +157,11 @@ Returns string like \"Hello\" or \"[image]\"."
                              video-height ,(map-nested-elt p-message '(videoMessage height)))
                            video-text)
       ;; Add action to play video on RET
-      (setq video-text (chats-app--add-action-to-text
+      (setq video-text (wasabi--add-action-to-text
                         video-text
                         (lambda ()
                           (interactive)
-                          (chats-app-chat-play-video-at-point))))
+                          (wasabi-chat-play-video-at-point))))
       (concat video-text
               (when-let ((caption (map-nested-elt p-message '(videoMessage caption))))
                 (concat "\n" caption)))))
@@ -177,7 +177,7 @@ Returns string like \"Hello\" or \"[image]\"."
     ;; (message "[unknown]\n\n%s" p-message)
     "[unknown]")))
 
-(cl-defun chats-app-chat--parse-sender-name (p-data p-sender-jid &key contacts contact-name)
+(cl-defun wasabi-chat--parse-sender-name (p-data p-sender-jid &key contacts contact-name)
   "Parse sender name from P-DATA and P-SENDER-JID.
 CONTACTS is the internal contacts alist for name resolution.
 CONTACT-NAME is an optional fallback name."
@@ -201,7 +201,7 @@ CONTACT-NAME is an optional fallback name."
                  p-sender-jid))
           "Unknown")))))
 
-(cl-defun chats-app-chat--parse-message (p-message &key chat-jid contact-name contacts reactions)
+(cl-defun wasabi-chat--parse-message (p-message &key chat-jid contact-name contacts reactions)
   "Parse a protocol message (from database) into internal display format.
 Returns alist with :sender-name, :timestamp, :content, :message-id, and :reactions.
 Returns nil for reaction messages (they're handled separately).
@@ -218,19 +218,19 @@ REACTIONS is a hash table of message-id -> list of reactions."
           ;; Skip reaction messages - they're already in reactions.
           (unless (map-nested-elt p-data '(Message reactionMessage))
             (let* ((p-sender-jid (map-nested-elt p-data '(Info Sender)))
-                   (p-sender-name (chats-app-chat--parse-sender-name p-data p-sender-jid
+                   (p-sender-name (wasabi-chat--parse-sender-name p-data p-sender-jid
                                                                       :contacts contacts
                                                                       :contact-name contact-name)))
               (if (and msg-id reactions (map-elt reactions msg-id))
                   `((:message-id . ,msg-id)
                     (:sender-name . ,p-sender-name)
                     (:timestamp . ,(map-nested-elt p-data '(Info Timestamp)))
-                    (:content . ,(chats-app-chat--parse-content (map-elt p-data 'Message)))
+                    (:content . ,(wasabi-chat--parse-content (map-elt p-data 'Message)))
                     (:reactions . ,(reverse (map-elt reactions msg-id))))
                 `((:message-id . ,msg-id)
                   (:sender-name . ,p-sender-name)
                   (:timestamp . ,(map-nested-elt p-data '(Info Timestamp)))
-                  (:content . ,(chats-app-chat--parse-content (map-elt p-data 'Message))))))))
+                  (:content . ,(wasabi-chat--parse-content (map-elt p-data 'Message))))))))
       ;; Fallback: parse from basic fields (outgoing messages without data_json)
       (let* ((is-from-me (string= (map-elt p-message 'sender_jid) "me"))
              (sender-name (if is-from-me "Me" (or contact-name chat-jid)))
@@ -248,7 +248,7 @@ REACTIONS is a hash table of message-id -> list of reactions."
             (:timestamp . ,timestamp)
             (:content . ,content)))))))
 
-(cl-defun chats-app-chat--parse-notification (&key p-message p-info contact-name chat-jid contacts)
+(cl-defun wasabi-chat--parse-notification (&key p-message p-info contact-name chat-jid contacts)
   "Parse protocol notification MESSAGE and INFO into internal message format.
 Returns alist with :sender-name, :timestamp, :content.
 For reaction messages, also includes :is-reaction, :target-id, and :emoji."
@@ -281,13 +281,13 @@ For reaction messages, also includes :is-reaction, :target-id, and :emoji."
                                     (match-string 1 sender)
                                   sender))
                               chat-jid)))
-           (content (chats-app-chat--parse-content p-message))
+           (content (wasabi-chat--parse-content p-message))
            (timestamp (map-elt p-info 'Timestamp)))
       `((:sender-name . ,sender-name)
         (:timestamp . ,timestamp)
         (:content . ,content)))))
 
-(cl-defun chats-app-chat--parse-reactions (p-messages &key contacts)
+(cl-defun wasabi-chat--parse-reactions (p-messages &key contacts)
   "Parse reactions from P-MESSAGES and return a hash map of message-id -> reactions.
 Each reaction is an alist with :emoji and :sender keys.
 CONTACTS is used to resolve sender names."
@@ -301,7 +301,7 @@ CONTACTS is used to resolve sender names."
                   ((map-nested-elt p-data '(Message reactionMessage)))
                   (p-target-id (map-nested-elt p-data '(Message reactionMessage key ID)))
                   (p-sender-jid (map-nested-elt p-data '(Info Sender)))
-                  (p-sender-name (chats-app-chat--parse-sender-name p-data p-sender-jid
+                  (p-sender-name (wasabi-chat--parse-sender-name p-data p-sender-jid
                                                                      :contacts contacts)))
         (map-put! reactions p-target-id
                   (cons `((:emoji . ,(map-nested-elt p-data '(Message reactionMessage text)))
@@ -309,14 +309,14 @@ CONTACTS is used to resolve sender names."
                         (map-elt reactions p-target-id)))))
     reactions))
 
-(cl-defun chats-app-chat--parse-messages (p-messages &key chat-jid contact-name contacts)
+(cl-defun wasabi-chat--parse-messages (p-messages &key chat-jid contact-name contacts)
   "Parse array of protocol messages into list of internal display messages.
 Returns list of message alists, sorted by timestamp (oldest first).
 Messages with reactions will have a :reactions field."
-  (let* ((reactions (chats-app-chat--parse-reactions p-messages :contacts contacts))
+  (let* ((reactions (wasabi-chat--parse-reactions p-messages :contacts contacts))
          (parsed (delq nil
                        (mapcar (lambda (p-msg)
-                                 (chats-app-chat--parse-message p-msg
+                                 (wasabi-chat--parse-message p-msg
                                                                 :chat-jid chat-jid
                                                                 :contact-name contact-name
                                                                 :contacts contacts
@@ -327,7 +327,7 @@ Messages with reactions will have a :reactions field."
             (string< (map-elt a :timestamp)
                      (map-elt b :timestamp))))))
 
-(defun chats-app-chat--calculate-max-sender-width (messages)
+(defun wasabi-chat--calculate-max-sender-width (messages)
   "Calculate maximum sender name width from internal MESSAGES for alignment."
   (if (null messages)
       0
@@ -338,25 +338,25 @@ Messages with reactions will have a :reactions field."
 
 ;; UI functions
 
-(defun chats-app-chat--has-actionable-items-p ()
+(defun wasabi-chat--has-actionable-items-p ()
   "Return non-nil if buffer contains at least one actionable item."
   (save-excursion
     (goto-char (point-min))
     (let ((pos (next-single-property-change (point) 'keymap)))
       (and pos (get-text-property pos 'keymap)))))
 
-(defun chats-app-chat--get-binding-string (command)
+(defun wasabi-chat--get-binding-string (command)
   "Get the key binding string for COMMAND, or nil if not bound."
-  (when-let ((keys (where-is-internal command chats-app-chat-mode-map)))
+  (when-let ((keys (where-is-internal command wasabi-chat-mode-map)))
     (propertize (key-description (car keys)) 'face 'help-key-binding)))
 
-(defun chats-app-chat--update-header-line ()
+(defun wasabi-chat--update-header-line ()
   "Update the header line with chat name and key bindings.
 Shows different bindings depending on whether point is in input area."
-  (let* ((in-input-area (chats-app-chat--in-input-area-p))
-         (has-actionables (chats-app-chat--has-actionable-items-p))
-         (title (or (map-elt chats-app-chat--chat :contact-name)
-                    (map-elt chats-app-chat--chat :chat-jid))))
+  (let* ((in-input-area (wasabi-chat--in-input-area-p))
+         (has-actionables (wasabi-chat--has-actionable-items-p))
+         (title (or (map-elt wasabi-chat--chat :contact-name)
+                    (map-elt wasabi-chat--chat :chat-jid))))
     (setq header-line-format
           (concat
            " "
@@ -366,33 +366,33 @@ Shows different bindings depending on whether point is in input area."
                ;; In input area
                (if has-actionables
                    (concat
-                    (chats-app-chat--get-binding-string #'chats-app-chat-previous-actionable)
+                    (wasabi-chat--get-binding-string #'wasabi-chat-previous-actionable)
                     "/"
-                    (chats-app-chat--get-binding-string #'chats-app-chat-next-actionable)
+                    (wasabi-chat--get-binding-string #'wasabi-chat-next-actionable)
                     " navigation "
-                    (chats-app-chat--get-binding-string #'chats-app-chat-send-input)
+                    (wasabi-chat--get-binding-string #'wasabi-chat-send-input)
                     " to send message")
                  ;; No actionables
                  (concat
-                  (chats-app-chat--get-binding-string #'chats-app-chat-send-input)
+                  (wasabi-chat--get-binding-string #'wasabi-chat-send-input)
                   " to send message"))
              ;; Outside input area
              (concat
               (when has-actionables
                 (concat
-                 (chats-app-chat--get-binding-string #'chats-app-chat-previous-actionable)
+                 (wasabi-chat--get-binding-string #'wasabi-chat-previous-actionable)
                  "/"
-                 (chats-app-chat--get-binding-string #'chats-app-chat-next-actionable)
+                 (wasabi-chat--get-binding-string #'wasabi-chat-next-actionable)
                  "/"))
-              (chats-app-chat--get-binding-string #'chats-app-chat-next-message)
+              (wasabi-chat--get-binding-string #'wasabi-chat-next-message)
               "/"
-              (chats-app-chat--get-binding-string #'chats-app-chat-previous-message)
+              (wasabi-chat--get-binding-string #'wasabi-chat-previous-message)
               " navigation "
-              (chats-app-chat--get-binding-string #'chats-app-chat-refresh)
+              (wasabi-chat--get-binding-string #'wasabi-chat-refresh)
               " refresh "
-              (chats-app-chat--get-binding-string #'chats-app-chat-quit) " quit"))))))
+              (wasabi-chat--get-binding-string #'wasabi-chat-quit) " quit"))))))
 
-(defun chats-app-chat--setup-prompt ()
+(defun wasabi-chat--setup-prompt ()
   "Set up the read-only prompt at the end of the buffer."
   (goto-char (point-max))
   (let ((inhibit-read-only t)
@@ -401,82 +401,82 @@ Shows different bindings depending on whether point is in input area."
     (unless (bolp)
       (insert "\n"))
     (insert "> ")
-    (setq chats-app-chat--prompt-marker (copy-marker prompt-start))
-    (setq chats-app-chat--input-start-marker (point-marker))
-    (set-marker-insertion-type chats-app-chat--input-start-marker nil)
-    (set-marker-insertion-type chats-app-chat--prompt-marker t)
+    (setq wasabi-chat--prompt-marker (copy-marker prompt-start))
+    (setq wasabi-chat--input-start-marker (point-marker))
+    (set-marker-insertion-type wasabi-chat--input-start-marker nil)
+    (set-marker-insertion-type wasabi-chat--prompt-marker t)
     (put-text-property prompt-start (point) 'read-only t)
     (put-text-property prompt-start (point) 'rear-nonsticky '(read-only))
     (put-text-property prompt-start (point) 'front-sticky '(read-only))))
 
-(defun chats-app-chat--get-prompt-input ()
+(defun wasabi-chat--get-prompt-input ()
   "Get the current input text after the prompt."
-  (when chats-app-chat--input-start-marker
-    (buffer-substring-no-properties chats-app-chat--input-start-marker (point-max))))
+  (when wasabi-chat--input-start-marker
+    (buffer-substring-no-properties wasabi-chat--input-start-marker (point-max))))
 
-(defun chats-app-chat--clear-prompt-input ()
+(defun wasabi-chat--clear-prompt-input ()
   "Clear the input area after the prompt."
-  (when chats-app-chat--input-start-marker
-    (delete-region chats-app-chat--input-start-marker (point-max))))
+  (when wasabi-chat--input-start-marker
+    (delete-region wasabi-chat--input-start-marker (point-max))))
 
-(define-derived-mode chats-app-chat-mode fundamental-mode "ChatsApp"
+(define-derived-mode wasabi-chat-mode fundamental-mode "Wasabi"
   "Major mode for displaying individual chat conversations.
 
-\\{chats-app-chat-mode-map}"
+\\{wasabi-chat-mode-map}"
   (setq-local inhibit-read-only nil)
-  (add-hook 'post-command-hook #'chats-app-chat--update-header-line nil t)
-  (chats-app-chat--update-header-line))
+  (add-hook 'post-command-hook #'wasabi-chat--update-header-line nil t)
+  (wasabi-chat--update-header-line))
 
-(defun chats-app-chat--in-input-area-p ()
+(defun wasabi-chat--in-input-area-p ()
   "Return non-nil if point is in the input area."
-  (and chats-app-chat--input-start-marker
-       (>= (point) chats-app-chat--input-start-marker)))
+  (and wasabi-chat--input-start-marker
+       (>= (point) wasabi-chat--input-start-marker)))
 
-(defun chats-app-chat-beginning-of-line ()
+(defun wasabi-chat-beginning-of-line ()
   "Like `move-beginning-of-line' but prompt-aware."
   (interactive)
-  (if (and (chats-app-chat--in-input-area-p)
-           chats-app-chat--input-start-marker)
-      (if (= (point) chats-app-chat--input-start-marker)
+  (if (and (wasabi-chat--in-input-area-p)
+           wasabi-chat--input-start-marker)
+      (if (= (point) wasabi-chat--input-start-marker)
           ;; Already at input start, go to real beginning
           (move-beginning-of-line 1)
         ;; Go to input start
-        (goto-char chats-app-chat--input-start-marker))
+        (goto-char wasabi-chat--input-start-marker))
     ;; Not in input area, use default behavior
     (move-beginning-of-line 1)))
 
-(defun chats-app-chat-quit ()
+(defun wasabi-chat-quit ()
   "Quit the chat buffer."
   (interactive)
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
-  (if (chats-app-chat--in-input-area-p)
+  (if (wasabi-chat--in-input-area-p)
       (self-insert-command 1)
     (quit-restore-window (get-buffer-window (current-buffer)) 'kill)))
 
-(defun chats-app-chat-send-input ()
+(defun wasabi-chat-send-input ()
   "Send the current input as a message."
   (interactive)
-  (unless (chats-app-chat--in-input-area-p)
+  (unless (wasabi-chat--in-input-area-p)
     (user-error "Press RET after > prompt to send a message"))
-  (when (string-empty-p (string-trim (chats-app-chat--get-prompt-input)))
+  (when (string-empty-p (string-trim (wasabi-chat--get-prompt-input)))
     (user-error "Nothing to send"))
-  (unless chats-app-chat--chat
+  (unless wasabi-chat--chat
     (error "No chat information available"))
-  (unless (map-elt chats-app-chat--chat :chat-jid)
+  (unless (map-elt wasabi-chat--chat :chat-jid)
     (error "No chat JID available"))
-  (let ((text (string-trim (chats-app-chat--get-prompt-input)))
-        (chat-jid (map-elt chats-app-chat--chat :chat-jid))
+  (let ((text (string-trim (wasabi-chat--get-prompt-input)))
+        (chat-jid (map-elt wasabi-chat--chat :chat-jid))
         (chat-buffer (current-buffer)))
-    (chats-app-chat--clear-prompt-input)
+    (wasabi-chat--clear-prompt-input)
     (message "Sending...")
-    (with-current-buffer (chats-app--buffer)
-      (chats-app--send-chat-send-text-request
+    (with-current-buffer (wasabi--buffer)
+      (wasabi--send-chat-send-text-request
        :phone chat-jid
        :body text
        :on-failure (lambda (error)
                      (message "Failed to send")
-                     (chats-app--log "Failed to send message: %s"
+                     (wasabi--log "Failed to send message: %s"
                                      (or (map-elt error 'message)
                                          "unknown error"))
                      ;; Restore cleared input
@@ -492,81 +492,81 @@ Shows different bindings depending on whether point is in input area."
                                        (:timestamp . ,timestamp-str)
                                        (:content . ,text))))
                        (with-current-buffer chat-buffer
-                         (chats-app-chat--append-message message))
+                         (wasabi-chat--append-message message))
                        (with-current-buffer chat-buffer
                          (goto-char (point-max)))))))))
 
-(defun chats-app-chat-refresh ()
+(defun wasabi-chat-refresh ()
   "Refresh the current chat buffer by fetching new messages."
   (interactive)
-  (if (chats-app-chat--in-input-area-p)
+  (if (wasabi-chat--in-input-area-p)
       (self-insert-command 1)
-    (unless chats-app-chat--chat
+    (unless wasabi-chat--chat
       (error "No chat information available"))
-    (let ((chat-jid (or (map-elt chats-app-chat--chat :chat-jid)
+    (let ((chat-jid (or (map-elt wasabi-chat--chat :chat-jid)
                         (error "No chat JID available")))
-          (contact-name (map-elt chats-app-chat--chat :contact-name)))
-      (with-current-buffer (chats-app--buffer)
-        (chats-app--send-chat-history-request
+          (contact-name (map-elt wasabi-chat--chat :contact-name)))
+      (with-current-buffer (wasabi--buffer)
+        (wasabi--send-chat-history-request
          :chat-jid chat-jid
          :contact-name contact-name
          :on-finished (lambda ()
                         (message "Refreshed")))))))
 
-(defun chats-app-chat-next-message ()
+(defun wasabi-chat-next-message ()
   "Jump to the next message (sender line)."
   (interactive)
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
-  (if (chats-app-chat--in-input-area-p)
+  (if (wasabi-chat--in-input-area-p)
       (self-insert-command 1)
     ;; First, skip past the current sender if we're on one
     (let ((start-pos (save-excursion
                        (end-of-line)
-                       (if (get-text-property (point) 'chats-app-sender)
-                           (or (next-single-property-change (point) 'chats-app-sender)
+                       (if (get-text-property (point) 'wasabi-sender)
+                           (or (next-single-property-change (point) 'wasabi-sender)
                                (point-max))
                          (point)))))
       ;; Then find the next sender
-      (let ((pos (next-single-property-change start-pos 'chats-app-sender)))
-        (if (and pos (get-text-property pos 'chats-app-sender))
+      (let ((pos (next-single-property-change start-pos 'wasabi-sender)))
+        (if (and pos (get-text-property pos 'wasabi-sender))
             (progn
               (goto-char pos)
               (beginning-of-line))
           ;; If at last message, bump to prompt.
           (goto-char (point-max)))))))
 
-(defun chats-app-chat-previous-message ()
+(defun wasabi-chat-previous-message ()
   "Jump to the previous message (sender line)."
   (interactive)
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
-  (if (chats-app-chat--in-input-area-p)
+  (if (wasabi-chat--in-input-area-p)
       (self-insert-command 1)
     ;; First, skip to the start of current sender if we're in the middle of one
-    (let ((start-pos (if (get-text-property (point) 'chats-app-sender)
-                         (or (previous-single-property-change (point) 'chats-app-sender)
+    (let ((start-pos (if (get-text-property (point) 'wasabi-sender)
+                         (or (previous-single-property-change (point) 'wasabi-sender)
                              (point-min))
                        (point))))
       ;; Then find the previous sender
-      (let ((pos (previous-single-property-change start-pos 'chats-app-sender)))
+      (let ((pos (previous-single-property-change start-pos 'wasabi-sender)))
         (if pos
             ;; Move to the start of that sender region
-            (let ((sender-start (or (previous-single-property-change pos 'chats-app-sender)
+            (let ((sender-start (or (previous-single-property-change pos 'wasabi-sender)
                                     (point-min))))
               (progn
-                (goto-char (if (get-text-property sender-start 'chats-app-sender)
+                (goto-char (if (get-text-property sender-start 'wasabi-sender)
                                sender-start
                              pos))
                 (beginning-of-line)))
           (message "No previous message"))))))
 
-(defun chats-app-chat-next-actionable ()
+(defun wasabi-chat-next-actionable ()
   "Move point to the next actionable item (image/video)."
   (interactive)
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
-  (if (chats-app-chat--in-input-area-p)
+  (if (wasabi-chat--in-input-area-p)
       (user-error "No more left")
     (let ((start-pos (if (get-text-property (point) 'keymap)
                          ;; If on an actionable, move past it first
@@ -578,16 +578,16 @@ Shows different bindings depending on whether point is in input area."
           (goto-char pos)
         (goto-char (point-max))))))
 
-(defun chats-app-chat-previous-actionable ()
+(defun wasabi-chat-previous-actionable ()
   "Move point to the previous actionable item (image/video).
 If in input area, move to just before the prompt."
   (interactive)
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
-  (when (and (chats-app-chat--in-input-area-p)
-             (chats-app-chat--has-actionable-items-p)
-             chats-app-chat--prompt-marker)
-    (goto-char chats-app-chat--prompt-marker))
+  (when (and (wasabi-chat--in-input-area-p)
+             (wasabi-chat--has-actionable-items-p)
+             wasabi-chat--prompt-marker)
+    (goto-char wasabi-chat--prompt-marker))
   (let ((start-pos (if (get-text-property (point) 'keymap)
                        ;; If on an actionable, move before it first
                        (or (previous-single-property-change (point) 'keymap)
@@ -604,27 +604,27 @@ If in input area, move to just before the prompt."
                 (goto-char prev)))))
       (user-error "No more left"))))
 
-(defun chats-app-chat--refresh (messages)
+(defun wasabi-chat--refresh (messages)
   "Refresh the current chat buffer with internal MESSAGES.
 MESSAGES is a list of already-parsed internal message alists."
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
-  (map-put! chats-app-chat--chat :messages messages)
-  (map-put! chats-app-chat--chat
-            :max-sender-width (chats-app-chat--calculate-max-sender-width messages))
+  (map-put! wasabi-chat--chat :messages messages)
+  (map-put! wasabi-chat--chat
+            :max-sender-width (wasabi-chat--calculate-max-sender-width messages))
   (let ((inhibit-read-only t))
     (erase-buffer)
     (if (null messages)
         (insert "\n")
-      (chats-app-chat--render-messages messages)
+      (wasabi-chat--render-messages messages)
       (let ((start (point)))
         (insert "\n\n")
         (put-text-property start (point) 'read-only t)))
-    (chats-app-chat--setup-prompt)
-    (chats-app-chat--update-header-line)
+    (wasabi-chat--setup-prompt)
+    (wasabi-chat--update-header-line)
     (goto-char (point-max))))
 
-(cl-defun chats-app-chat--render-message (&key sender-name timestamp content max-sender-width reactions message-id)
+(cl-defun wasabi-chat--render-message (&key sender-name timestamp content max-sender-width reactions message-id)
   "Render a single internal message.
 SENDER-NAME is the display name of the sender.
 TIMESTAMP is the ISO8601 timestamp string.
@@ -638,8 +638,8 @@ MESSAGE-ID is used to tag the rendered message for later updates."
                              'face `(:inherit ,(if is-from-me
                                                    'font-lock-variable-name-face
                                                  'font-lock-function-name-face) :box nil)
-                             'chats-app-sender t
-                             'chats-app-message-id message-id))
+                             'wasabi-sender t
+                             'wasabi-message-id message-id))
          (sender-padding (make-string (max 0 (- (or max-sender-width 0)
                                                 (string-width sender))) ?\s))
          (time (when timestamp
@@ -676,14 +676,14 @@ MESSAGE-ID is used to tag the rendered message for later updates."
                        reactions
                        "\n"))))))
 
-(defun chats-app-chat--render-messages (messages)
+(defun wasabi-chat--render-messages (messages)
   "Render internal format MESSAGES to current buffer.
 MESSAGES is a list of alists with :sender-name, :timestamp, :content."
-  (let* ((max-sender-width (map-elt chats-app-chat--chat :max-sender-width))
+  (let* ((max-sender-width (map-elt wasabi-chat--chat :max-sender-width))
          (message-lines
           (mapcar
            (lambda (msg)
-             (chats-app-chat--render-message
+             (wasabi-chat--render-message
               :sender-name (map-elt msg :sender-name)
               :timestamp (map-elt msg :timestamp)
               :content (map-elt msg :content)
@@ -695,86 +695,86 @@ MESSAGES is a list of alists with :sender-name, :timestamp, :content."
       (insert (mapconcat #'identity message-lines "\n\n"))
       (put-text-property start (point) 'read-only t))))
 
-(defun chats-app-chat--append-message (message)
+(defun wasabi-chat--append-message (message)
   "Append a single internal MESSAGE to current chat buffer.
 MESSAGE is an alist with :sender-name, :timestamp, :content.
 Updates :messages list and :max-sender-width in chat state."
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
   (unless message
     (error "message is required"))
   (let ((inhibit-read-only t)
         (saved-input nil))
     (save-excursion
-      (when chats-app-chat--prompt-marker
+      (when wasabi-chat--prompt-marker
         ;; Save any user input before deleting the prompt
-        (setq saved-input (chats-app-chat--get-prompt-input))
+        (setq saved-input (wasabi-chat--get-prompt-input))
         ;; Delete the existing prompt
-        (delete-region chats-app-chat--prompt-marker (point-max)))
+        (delete-region wasabi-chat--prompt-marker (point-max)))
       (goto-char (point-max))
       (let* ((start (point))
              (sender-width (string-width (map-elt message :sender-name)))
-             (old-max-width (or (map-elt chats-app-chat--chat :max-sender-width) 0))
+             (old-max-width (or (map-elt wasabi-chat--chat :max-sender-width) 0))
              (new-max-width (max old-max-width sender-width))
-             (updated-messages (append (map-elt chats-app-chat--chat :messages)
+             (updated-messages (append (map-elt wasabi-chat--chat :messages)
                                        (list message))))
         ;; Update chat state with new messages and max-width
-        (chats-app-chat--update-chat :max-sender-width new-max-width)
-        (chats-app-chat--update-chat :messages updated-messages)
+        (wasabi-chat--update-chat :max-sender-width new-max-width)
+        (wasabi-chat--update-chat :messages updated-messages)
         ;; Render the message
-        (insert (chats-app-chat--render-message
+        (insert (wasabi-chat--render-message
                  :sender-name (map-elt message :sender-name)
                  :timestamp (map-elt message :timestamp)
                  :content (map-elt message :content)
-                 :max-sender-width (map-elt chats-app-chat--chat :max-sender-width)
+                 :max-sender-width (map-elt wasabi-chat--chat :max-sender-width)
                  :reactions (map-elt message :reactions)
                  :message-id (map-elt message :message-id)))
         (insert "\n\n")
         (put-text-property start (point) 'read-only t))
-      (chats-app-chat--setup-prompt)
+      (wasabi-chat--setup-prompt)
       ;; Restore saved input
       (when (and saved-input (not (string-empty-p saved-input)))
         (goto-char (point-max))
         (insert saved-input)))
-    (chats-app-chat--update-header-line)))
+    (wasabi-chat--update-header-line)))
 
-(cl-defun chats-app-chat--add-reaction (&key target-id emoji sender)
+(cl-defun wasabi-chat--add-reaction (&key target-id emoji sender)
   "Add a reaction to an existing message with TARGET-ID.
 EMOJI is the reaction emoji, SENDER is the name of who reacted.
 Finds the message in :messages, updates it, and re-renders just that message."
-  (unless (derived-mode-p 'chats-app-chat-mode)
+  (unless (derived-mode-p 'wasabi-chat-mode)
     (error "Not in a chat buffer"))
-  (chats-app--log "add-reaction called with target-id: %s, emoji: %s, sender: %s" target-id emoji sender)
-  (if-let* ((target-idx (seq-position (map-elt chats-app-chat--chat :messages)
+  (wasabi--log "add-reaction called with target-id: %s, emoji: %s, sender: %s" target-id emoji sender)
+  (if-let* ((target-idx (seq-position (map-elt wasabi-chat--chat :messages)
                                       target-id
                                       (lambda (msg id) (string= (map-elt msg :message-id) id))))
-            (target-msg (nth target-idx (map-elt chats-app-chat--chat :messages)))
+            (target-msg (nth target-idx (map-elt wasabi-chat--chat :messages)))
             (updated-msg (cons `(:reactions . ,(append (map-elt target-msg :reactions)
                                                        (list `((:emoji . ,emoji) (:sender . ,sender)))))
                                (assq-delete-all :reactions (copy-alist target-msg))))
-            (updated-messages (append (seq-take (map-elt chats-app-chat--chat :messages) target-idx)
+            (updated-messages (append (seq-take (map-elt wasabi-chat--chat :messages) target-idx)
                                       (list updated-msg)
-                                      (seq-drop (map-elt chats-app-chat--chat :messages) (1+ target-idx)))))
+                                      (seq-drop (map-elt wasabi-chat--chat :messages) (1+ target-idx)))))
       (progn
-        (chats-app--log "Found message at index %d, message-id: %s" target-idx (map-elt target-msg :message-id))
-        (chats-app-chat--update-chat :messages updated-messages)
+        (wasabi--log "Found message at index %d, message-id: %s" target-idx (map-elt target-msg :message-id))
+        (wasabi-chat--update-chat :messages updated-messages)
         (let ((inhibit-read-only t))
           (save-excursion
             ;; Find message by its message-id text property using text-property-search-forward
-            (chats-app--log "Looking for message-id in buffer: %s" target-id)
+            (wasabi--log "Looking for message-id in buffer: %s" target-id)
             (goto-char (point-min))
-            (when-let* ((match (text-property-search-forward 'chats-app-message-id target-id #'equal))
+            (when-let* ((match (text-property-search-forward 'wasabi-message-id target-id #'equal))
                         (prop-pos (prop-match-beginning match)))
               ;; prop-pos is somewhere in the sender text, find the start of the line
               (goto-char prop-pos)
               (beginning-of-line)
               (let* ((msg-start (point))
-                     ;; Find the next message by looking for the next chats-app-sender property
+                     ;; Find the next message by looking for the next wasabi-sender property
                      ;; First, move past the current sender property
-                     (after-sender (next-single-property-change prop-pos 'chats-app-sender))
+                     (after-sender (next-single-property-change prop-pos 'wasabi-sender))
                      ;; Then find the next sender (start of next message)
                      (next-sender (when after-sender
-                                    (next-single-property-change after-sender 'chats-app-sender)))
+                                    (next-single-property-change after-sender 'wasabi-sender)))
                      ;; If there's a next message, find its line start; otherwise use prompt marker
                      (msg-end (if next-sender
                                   (save-excursion
@@ -784,22 +784,22 @@ Finds the message in :messages, updates it, and re-renders just that message."
                                     (skip-chars-backward "\n")
                                     (point))
                                 ;; Last message: stop at prompt marker (or point-max if no prompt)
-                                (or chats-app-chat--prompt-marker (point-max)))))
+                                (or wasabi-chat--prompt-marker (point-max)))))
                 (delete-region msg-start msg-end)
                 (goto-char msg-start)
-                (insert (chats-app-chat--render-message
+                (insert (wasabi-chat--render-message
                          :sender-name (map-elt updated-msg :sender-name)
                          :timestamp (map-elt updated-msg :timestamp)
                          :content (map-elt updated-msg :content)
-                         :max-sender-width (map-elt chats-app-chat--chat :max-sender-width)
+                         :max-sender-width (map-elt wasabi-chat--chat :max-sender-width)
                          :reactions (map-elt updated-msg :reactions)
                          :message-id (map-elt updated-msg :message-id)))
                 ;; Ensure newline before prompt.
                 (unless next-sender
                   (insert "\n\n")))))))
-    (chats-app--log "Could not find message with ID %s to add reaction" target-id)))
+    (wasabi--log "Could not find message with ID %s to add reaction" target-id)))
 
-(cl-defun chats-app-chat--start (&key chat-jid messages contact-name)
+(cl-defun wasabi-chat--start (&key chat-jid messages contact-name)
   "Create and display a chat buffer for CHAT-JID.
 MESSAGES is a list of already-parsed internal message alists.
 CONTACT-NAME is the display name of the contact (or nil if not available).
@@ -807,18 +807,18 @@ Displays messages in a two-column format: sender | message."
   (unless chat-jid
     (error ":chat-jid is required"))
   ;; TODO: Consolidate buffer creation logic.
-  (let ((chat-buffer (get-buffer-create (format "*ChatsApp: %s*" (or contact-name chat-jid)))))
+  (let ((chat-buffer (get-buffer-create (format "*Wasabi: %s*" (or contact-name chat-jid)))))
     (with-current-buffer chat-buffer
-      (unless (derived-mode-p 'chats-app-chat-mode)
-        (chats-app-chat-mode))
-      (setq chats-app-chat--chat (chats-app-chat--make-chat :chat-jid chat-jid
+      (unless (derived-mode-p 'wasabi-chat-mode)
+        (wasabi-chat-mode))
+      (setq wasabi-chat--chat (wasabi-chat--make-chat :chat-jid chat-jid
                                                             :contact-name contact-name))
-      (chats-app-chat--refresh messages)
+      (wasabi-chat--refresh messages)
       (goto-char (point-max)))
 
     (switch-to-buffer chat-buffer)))
 
-(defun chats-app-chat-play-video-at-point ()
+(defun wasabi-chat-play-video-at-point ()
   "Download and play the video at point using external player."
   (interactive)
   (unless (get-text-property (point) 'video-url)
@@ -840,17 +840,17 @@ Displays messages in a two-column format: sender | message."
                      ((string-match "video/x-matroska" mimetype) ".mkv")
                      ((string-match "video/webm" mimetype) ".webm")
                      (t ".mp4")))
-         (media-dir (expand-file-name "media" (chats-app-data-dir)))
+         (media-dir (expand-file-name "media" (wasabi-data-dir)))
          (media-file (expand-file-name (concat file-id extension) media-dir)))
     (unless (file-directory-p media-dir)
       (make-directory media-dir t))
     (if (file-exists-p media-file)
         ;; File already downloaded, just open it
-        (chats-app-chat--open-video-externally media-file)
+        (wasabi-chat--open-video-externally media-file)
       ;; Download the video
       (message "Downloading video...")
-      (with-current-buffer (chats-app--buffer)
-        (chats-app--send-download-video-request
+      (with-current-buffer (wasabi--buffer)
+        (wasabi--send-download-video-request
          :url url
          :direct-path direct-path
          :media-key media-key
@@ -860,7 +860,7 @@ Displays messages in a two-column format: sender | message."
          :file-length file-length
          :on-success (lambda (response)
                        (message "Downloading video... done")
-                       (chats-app-chat--save-and-play-video
+                       (wasabi-chat--save-and-play-video
                         :data-url (map-elt response 'Data)
                         :mimetype mimetype
                         :file-sha256 file-sha256))
@@ -868,7 +868,7 @@ Displays messages in a two-column format: sender | message."
                        (message "Failed to download video: %s"
                                 (or (map-elt error 'message) "unknown"))))))))
 
-(cl-defun chats-app-chat--save-and-play-video (&key data-url mimetype file-sha256)
+(cl-defun wasabi-chat--save-and-play-video (&key data-url mimetype file-sha256)
   "Save video to media directory and open with external player.
 DATA-URL is the base64-encoded data URL from the backend.
 MIMETYPE is the video MIME type.
@@ -891,7 +891,7 @@ FILE-SHA256 is used to create a unique filename."
                      ((string-match "video/x-matroska" mimetype) ".mkv")
                      ((string-match "video/webm" mimetype) ".webm")
                      (t ".mp4")))
-         (media-dir (expand-file-name "media" (chats-app-data-dir)))
+         (media-dir (expand-file-name "media" (wasabi-data-dir)))
          (temp-file (expand-file-name (concat file-id extension) media-dir)))
     ;; Ensure media directory exists
     (unless (file-directory-p media-dir)
@@ -900,9 +900,9 @@ FILE-SHA256 is used to create a unique filename."
     (with-temp-file temp-file
       (set-buffer-multibyte nil)
       (insert video-data))
-    (chats-app-chat--open-video-externally temp-file)))
+    (wasabi-chat--open-video-externally temp-file)))
 
-(defun chats-app-chat--open-video-externally (file-path)
+(defun wasabi-chat--open-video-externally (file-path)
   "Open video FILE-PATH with system default player."
   (cond
    ;; macOS
@@ -918,8 +918,8 @@ FILE-SHA256 is used to create a unique filename."
    (t
     (browse-url-of-file file-path))))
 
-(defun chats-app-chat-view-image-at-point ()
-  "View the full image at point in a *ChatsApp photo* buffer."
+(defun wasabi-chat-view-image-at-point ()
+  "View the full image at point in a *Wasabi photo* buffer."
   (interactive)
   (unless (get-text-property (point) 'image-url)
     (user-error "No image at point"))
@@ -942,18 +942,18 @@ FILE-SHA256 is used to create a unique filename."
                      ((string-match "image/gif" mimetype) ".gif")
                      ((string-match "image/webp" mimetype) ".webp")
                      (t ".jpg")))
-         (media-dir (expand-file-name "media" (chats-app-data-dir)))
+         (media-dir (expand-file-name "media" (wasabi-data-dir)))
          (cached-file (expand-file-name (concat file-id extension) media-dir)))
     ;; Ensure media directory exists
     (unless (file-directory-p media-dir)
       (make-directory media-dir t))
     (if (file-exists-p cached-file)
         ;; File already cached, display it directly
-        (chats-app-chat--display-cached-image cached-file width height)
+        (wasabi-chat--display-cached-image cached-file width height)
       ;; Download the image
       (message "Downloading image...")
-      (with-current-buffer (chats-app--buffer)
-        (chats-app--send-download-image-request
+      (with-current-buffer (wasabi--buffer)
+        (wasabi--send-download-image-request
          :url url
          :direct-path direct-path
          :media-key media-key
@@ -963,7 +963,7 @@ FILE-SHA256 is used to create a unique filename."
          :file-length file-length
          :on-success (lambda (response)
                        (message "Downloading image... done")
-                       (chats-app-chat--save-and-display-image
+                       (wasabi-chat--save-and-display-image
                         :data-url (map-elt response 'Data)
                         :mimetype mimetype
                         :file-path cached-file
@@ -973,7 +973,7 @@ FILE-SHA256 is used to create a unique filename."
                        (message "Failed to download image: %s"
                                 (or (map-elt error 'message) "unknown"))))))))
 
-(cl-defun chats-app-chat--display-cached-image (file-path width height)
+(cl-defun wasabi-chat--display-cached-image (file-path width height)
   "Display cached image from FILE-PATH."
   (let* ((image-data (with-temp-buffer
                        (set-buffer-multibyte nil)
@@ -985,7 +985,7 @@ FILE-SHA256 is used to create a unique filename."
                       ((string-suffix-p ".gif" file-path) 'gif)
                       ((string-suffix-p ".webp" file-path) 'imagemagick)
                       (t 'jpeg)))
-         (photo-buffer (get-buffer-create "*ChatsApp photo*")))
+         (photo-buffer (get-buffer-create "*Wasabi photo*")))
     (with-current-buffer photo-buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -1010,7 +1010,7 @@ FILE-SHA256 is used to create a unique filename."
           (insert "\n")
           (goto-char (point-min)))))))
 
-(cl-defun chats-app-chat--save-and-display-image (&key data-url mimetype file-path width height)
+(cl-defun wasabi-chat--save-and-display-image (&key data-url mimetype file-path width height)
   "Save image to FILE-PATH and display it.
 DATA-URL is the base64-encoded data URL from the backend.
 MIMETYPE is the image MIME type.
@@ -1025,10 +1025,10 @@ FILE-PATH is where to save the cached image."
     (set-buffer-multibyte nil)
     (insert (base64-decode-string (match-string 1 data-url))))
   ;; Display it
-  (chats-app-chat--display-cached-image file-path width height))
+  (wasabi-chat--display-cached-image file-path width height))
 
-(cl-defun chats-app-chat--display-image-in-buffer (&key data-url mimetype width height)
-  "Display image in *ChatsApp photo* buffer.
+(cl-defun wasabi-chat--display-image-in-buffer (&key data-url mimetype width height)
+  "Display image in *Wasabi photo* buffer.
 DATA-URL is the base64-encoded data URL from the backend.
 MIMETYPE is the image MIME type."
   (unless data-url
@@ -1044,7 +1044,7 @@ MIMETYPE is the image MIME type."
                       ((string-match "image/gif" mimetype) 'gif)
                       ((string-match "image/webp" mimetype) 'imagemagick)
                       (t 'imagemagick)))
-         (photo-buffer (get-buffer-create "*ChatsApp photo*")))
+         (photo-buffer (get-buffer-create "*Wasabi photo*")))
     (with-current-buffer photo-buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -1078,7 +1078,7 @@ MIMETYPE is the image MIME type."
           (insert "\n")
           (goto-char (point-min)))))))
 
-(cl-defun chats-app-chat--create-rounded-image (&key image-data image-type max-width max-height corner-radius padding-top padding-bottom padding-leading padding-trailing is-video)
+(cl-defun wasabi-chat--create-rounded-image (&key image-data image-type max-width max-height corner-radius padding-top padding-bottom padding-leading padding-trailing is-video)
   "Create an SVG image with rounded corners containing IMAGE-DATA.
 IMAGE-DATA is the raw image data.
 IMAGE-TYPE is the image type (jpeg, png, etc.).
@@ -1149,5 +1149,5 @@ IS-VIDEO if non-nil, overlays a play button on the thumbnail."
                         (or play-button ""))))
     (create-image svg-template 'svg t)))
 
-(provide 'chats-app-chat)
-;;; chats-app-chat.el ends here
+(provide 'wasabi-chat)
+;;; wasabi-chat.el ends here
