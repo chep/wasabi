@@ -585,6 +585,7 @@ If in input area, move to just before the prompt."
   (unless (derived-mode-p 'chats-app-chat-mode)
     (error "Not in a chat buffer"))
   (when (and (chats-app-chat--in-input-area-p)
+             (chats-app-chat--has-actionable-items-p)
              chats-app-chat--prompt-marker)
     (goto-char chats-app-chat--prompt-marker))
   (let ((start-pos (if (get-text-property (point) 'keymap)
