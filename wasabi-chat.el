@@ -39,6 +39,7 @@
 (declare-function wasabi--add-action-to-text "wasabi")
 (declare-function wasabi--buffer "wasabi")
 (declare-function wasabi--face-height-pixels "wasabi")
+(declare-function wasabi--header-graphical-p "wasabi")
 (declare-function wasabi--log "wasabi")
 (declare-function wasabi--send-chat-history-request "wasabi")
 (declare-function wasabi--send-chat-send-text-request "wasabi")
@@ -361,11 +362,14 @@ Shows different bindings depending on whether point is in input area."
                     (map-elt wasabi-chat--chat :chat-jid))))
     (setq header-line-format
           (concat
-           " "
-           (wasabi-icon (wasabi--face-height-pixels 'font-lock-doc-face))
-           " "
+           (when (wasabi--header-graphical-p)
+             (concat
+              " "
+              (wasabi-icon (wasabi--face-height-pixels 'font-lock-doc-face))))
            (when title
-             (concat (propertize title 'face 'font-lock-doc-face) " "))
+             (concat
+              " "
+              (propertize title 'face 'font-lock-doc-face) " "))
            (if in-input-area
                ;; In input area
                (if has-actionables
@@ -506,6 +510,7 @@ Shows different bindings depending on whether point is in input area."
       (self-insert-command 1)
     (unless wasabi-chat--chat
       (error "No chat information available"))
+    (wasabi-chat--update-header-line)
     (let ((chat-jid (or (map-elt wasabi-chat--chat :chat-jid)
                         (error "No chat JID available")))
           (contact-name (map-elt wasabi-chat--chat :contact-name)))

@@ -68,6 +68,17 @@ If the directory does not exist, it will be created automatically."
   :type 'directory
   :group 'wasabi)
 
+(defcustom wasabi-header-style (if (display-graphic-p) 'graphical 'text)
+  "Style for wasabi buffer headers.
+
+Can be one of:
+
+ \='graphical: Display header with icon and styled text.
+ \='text: Display simple text-only header."
+  :type '(choice (const :tag "Graphical" graphical)
+                 (const :tag "Text only" text))
+  :group 'wasabi)
+
 (defcustom wasabi-video-player-function nil
   "Function to open video files for viewing.
 
@@ -137,17 +148,31 @@ it is required internally by the process.")
 
 (defvar-local wasabi--state nil)
 
-(cl-defun wasabi--initialize (&key home-buffer status-type status-message)
+(cl-defun wasabi--initialize (&key wasabi-buffer status-type status-message)
   "Initialize wasabi client and progress through startup sequence.
 
 Optional STATUS-TYPE and STATUS-MESSAGE params set the status before proceeding.
-Uses :status :type to track progress through initialization phases."
+Uses :status :type to track progress through initialization phases.
+For silent background refreshes, set :silent-refresh in state before calling."
+  (unless wasabi-buffer
+    (error ":wasabi-buffer is required"))
+
   (unless wasabi--state
-    (setq wasabi--state (wasabi--make-state :home-buffer home-buffer)))
+    (setq wasabi--state (wasabi--make-state :wasabi-buffer wasabi-buffer)))
+
+  (wasabi--log "wasabi--initialize (wasabi-buffer: %s)(status-type: %s)"
+               wasabi-buffer
+               (map-nested-elt (wasabi--state) '(:status :type)))
 
   ;; Set status if provided
   (when status-type
-    (wasabi--set-status :type status-type :message status-message))
+    (wasabi--set-status :type status-type
+                        :message status-message
+                        :silent (map-elt (wasabi--state) :silent-refresh)))
+
+  ;; Silent flag no longer necessary after ready. Clear it.
+  (when (eq status-type 'ready)
+    (map-delete (wasabi--state) :silent-refresh))
 
   (cond
    ;; Step 1: Create client
@@ -157,13 +182,16 @@ Uses :status :type to track progress through initialization phases."
                                        :command-params (cdr wasabi-wuzapi-command)
                                        :environment-variables (list (concat "WUZAPI_ADMIN_TOKEN=" wasabi--admin-token)
                                                                     (concat "TZ=" (wasabi--timezone)))
-                                       :context-buffer home-buffer))
+                                       :context-buffer wasabi-buffer))
     (wasabi--initialize-subscriptions)
-    (wasabi--initialize :home-buffer home-buffer :status-type 'check-user :status-message "Loading..."))
+    (wasabi--initialize :wasabi-buffer wasabi-buffer
+                        :status-type 'check-user
+                        :status-message (wasabi--make-loading-message)))
    ;; Step 2: Check if user exists
    ((eq (map-nested-elt (wasabi--state) '(:status :type))
         'check-user)
-    (wasabi--set-status :type 'checking-user :message "Loading...")
+    (wasabi--set-status :type 'checking-user
+                        :message (wasabi--make-loading-message))
     (acp-send-request :client (map-elt (wasabi--state) :client)
                       :request (wasabi--make-admin-users-list-request
                                 :admin-token wasabi--admin-token)
@@ -171,13 +199,13 @@ Uses :status :type to track progress through initialization phases."
                                     (wasabi--log "Found %d users" (length users))
                                     (if (seq-empty-p users)
                                         ;; Need to add user
-                                        (wasabi--initialize :home-buffer home-buffer
+                                        (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                             :status-type 'add-user
-                                                            :status-message "Initializing client...")
+                                                            :status-message (wasabi--make-loading-message))
                                       ;; User exists, continue
-                                      (wasabi--initialize :home-buffer home-buffer
+                                      (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                           :status-type 'check-session-status
-                                                          :status-message "Loading...")))
+                                                          :status-message (wasabi--make-loading-message))))
                       :on-failure (lambda (error)
                                     (wasabi--log "Couldn't load user: %s"
                                                  (or (map-elt error 'message) "unknown"))
@@ -195,9 +223,9 @@ Uses :status :type to track progress through initialization phases."
                                 :history 100)
                       :on-success (lambda (_response)
                                     (wasabi--log "User added successfully")
-                                    (wasabi--initialize :home-buffer home-buffer
+                                    (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                         :status-type 'check-session-status
-                                                        :status-message "Loading..."))
+                                                        :status-message (wasabi--make-loading-message)))
                       :on-failure (lambda (error)
                                     (wasabi--log "Couldn't add local user: %s" (map-elt error 'message))
                                     (wasabi--set-status :type 'error
@@ -218,20 +246,21 @@ Uses :status :type to track progress through initialization phases."
                                            (map-elt response 'loggedIn))
                                       (map-put! (wasabi--state) :connected t)
                                       (wasabi--log "Already connected and logged in")
-                                      (wasabi--initialize :home-buffer home-buffer
+                                      (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                           :status-type 'fetch-contacts
-                                                          :status-message "Loading contacts..."))
+                                                          :status-message (wasabi--make-loading-message)))
                                      ;; Connected but not logged in - wait for notification
                                      ((map-elt response 'connected)
                                       (map-put! (wasabi--state) :connected t)
                                       (wasabi--log "Connected but not logged in, waiting for Connected notification")
-                                      (wasabi--set-status :type 'already-connected :message "Loading..."))
+                                      (wasabi--set-status :type 'already-connected
+                                                          :message (wasabi--make-loading-message)))
                                      ;; Not connected - initiate connection
                                      (t
                                       (wasabi--log "Not connected, initiating connection")
-                                      (wasabi--initialize :home-buffer home-buffer
+                                      (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                           :status-type 'connect-session
-                                                          :status-message "Loading..."))))
+                                                          :status-message (wasabi--make-loading-message)))))
                       :on-failure (lambda (error)
                                     (wasabi--log "Status check failed: %s" (or (map-elt error 'message) "unknown"))
                                     (wasabi--set-status :type 'error
@@ -246,7 +275,8 @@ Uses :status :type to track progress through initialization phases."
                                 :subscribe wasabi--event-subscriptions)
                       :on-success (lambda (_response)
                                     (wasabi--log "Connection request successful, awaiting notification")
-                                    (wasabi--set-status :type 'awaiting-connection :message "Loading..."))
+                                    (wasabi--set-status :type 'awaiting-connection
+                                                        :message (wasabi--make-loading-message)))
                       :on-failure (lambda (error)
                                     (if (and (map-elt error 'message)
                                              (string-match-p "already connected" (map-elt error 'message)))
@@ -257,6 +287,7 @@ Uses :status :type to track progress through initialization phases."
    ;; Step 6: Fetch contacts
    ((eq (map-nested-elt (wasabi--state) '(:status :type))
         'fetch-contacts)
+    (wasabi--log "Fetching contacts...")
     (acp-send-request :client (map-elt (wasabi--state) :client)
                       :request (wasabi--make-user-contacts-request
                                 :token wasabi-user-token)
@@ -275,9 +306,10 @@ Uses :status :type to track progress through initialization phases."
                                         (wasabi--log "No contacts from backend (expected on fresh pairing)"))
                                       ;; Continue to fetch groups regardless of contact count.
                                       ;; WhatsApp Web may not provide contacts on fresh pairing.
-                                      (wasabi--initialize :home-buffer home-buffer
+                                      (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                           :status-type 'fetch-groups
-                                                          :status-message "Loading groups...")))
+                                                          :status-message
+                                                          (wasabi--make-loading-message))))
                       :on-failure (lambda (error)
                                     (wasabi--log "Failed to fetch contacts: %s" (map-elt error 'message))
                                     (wasabi--set-status :type 'error
@@ -285,6 +317,7 @@ Uses :status :type to track progress through initialization phases."
    ;; Step 7: Fetch groups
    ((eq (map-nested-elt (wasabi--state) '(:status :type))
         'fetch-groups)
+    (wasabi--log "Fetching groups...")
     (acp-send-request :client (map-elt (wasabi--state) :client)
                       :request (wasabi--make-group-list-request
                                 :token wasabi-user-token)
@@ -301,9 +334,9 @@ Uses :status :type to track progress through initialization phases."
                                            (groups (wasabi--parse-groups p-groups)))
                                       (map-put! (wasabi--state) :groups groups)
                                       (wasabi--log "Fetched %d groups" (length groups))
-                                      (wasabi--initialize :home-buffer home-buffer
+                                      (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                           :status-type 'fetch-chats
-                                                          :status-message "Loading chats...")))
+                                                          :status-message (wasabi--make-loading-message))))
                       :on-failure (lambda (error)
                                     (wasabi--log "Failed to fetch groups: %s" (map-elt error 'message))
                                     (wasabi--set-status :type 'error
@@ -312,6 +345,7 @@ Uses :status :type to track progress through initialization phases."
    ;; Step 8: Fetch chat index
    ((eq (map-nested-elt (wasabi--state) '(:status :type))
         'fetch-chats)
+    (wasabi--log "Fetching chat index...")
     (wasabi--send-chat-history-request
      :chat-jid "index"
      :on-finished (lambda ()
@@ -321,10 +355,32 @@ Uses :status :type to track progress through initialization phases."
    ((memq status-type '(awaiting-connection qr paired already-connected ready error disconnected))
     nil)))
 
+(defun wasabi--make-icon-message (message)
+  "Make MESSAGE with icon."
+  (concat
+   (wasabi-icon (* 2 (wasabi--face-height-pixels 'font-lock-doc-face)))
+   "\n\n"
+   message))
+
+(defun wasabi--header-graphical-p ()
+  (and (display-graphic-p)
+       (eq wasabi-header-style 'graphical)))
+
+(defun wasabi--make-loading-message ()
+  "Make \"Loading...\" message."
+  (if (wasabi--header-graphical-p)
+      ;; Compensate with prefixed whitespace
+      ;; for visual centering as the ...
+      ;; makes it look off center compared
+      ;; to the icon.
+      (wasabi--make-icon-message "    Loading...")
+    "Loading..."))
+
 (defun wasabi--send-connect-request ()
   (unless (derived-mode-p 'wasabi-mode)
     (error "Not in a chats buffer"))
-  (wasabi--set-status :type 'connecting :message "Loading...")
+  (wasabi--set-status :type 'connecting
+                      :message (wasabi--make-loading-message))
   (acp-send-request :client (map-elt (wasabi--state) :client)
                     :request (wasabi--make-session-connect-request
                               :token wasabi-user-token
@@ -332,7 +388,8 @@ Uses :status :type to track progress through initialization phases."
                               :subscribe wasabi--event-subscriptions)
                     :on-success (lambda (_response)
                                   (wasabi--log "Initial connection successful (waiting for notification)")
-                                  (wasabi--set-status :type 'awaiting-connection :message "Loading..."))
+                                  (wasabi--set-status :type 'awaiting-connection
+                                                      :message (wasabi--make-loading-message)))
                     :on-failure (lambda (error)
                                   ;; Already connected, don't display as
                                   ;; error since it can be ignored.
@@ -454,7 +511,7 @@ For a specific chat JID, stores message array in :chats and opens chat buffer."
                                     (funcall on-finished)))
                     :on-failure (lambda (error)
                                   (wasabi--log "Failed to fetch chat history for %s: %s" chat-jid (or (map-elt error 'message) "unknown"))
-                                  (message "Failed to fetch chat history: %s" (or (map-elt error 'message) "unknown")))))
+                                  (message "Failed to fetch chat history"))))
 
 (cl-defun wasabi--send-chat-send-text-request (&key phone body on-success on-failure)
   "Send a text message to PHONE with BODY.
@@ -572,9 +629,9 @@ Calls ON-FAILURE with error if download fails."
                                (wasabi--display-qr-code (map-nested-elt notification '(params qrCodeBase64)))))
                             ((equal (map-elt notification 'method) "PairSuccess")
                              (wasabi--log "Pairing successful")
-                             (wasabi--initialize :home-buffer (map-elt (wasabi--state) :home-buffer)
+                             (wasabi--initialize :wasabi-buffer (map-elt (wasabi--state) :wasabi-buffer)
                                                  :status-type 'paired
-                                                 :status-message "QR code scanned, connecting..."))
+                                                 :status-message (wasabi--make-loading-message)))
                             ((equal (map-elt notification 'method) "Connected")
                              (map-put! (wasabi--state) :connected t)
                              (wasabi--log "Connected to WhatsApp")
@@ -582,9 +639,9 @@ Calls ON-FAILURE with error if download fails."
                              (let ((status-type (map-nested-elt (wasabi--state) '(:status :type))))
                                (when (memq status-type '(awaiting-connection already-connected qr paired))
                                  (wasabi--log "Resuming initialization after connection")
-                                 (wasabi--initialize :home-buffer (map-elt (wasabi--state) :home-buffer)
+                                 (wasabi--initialize :wasabi-buffer (map-elt (wasabi--state) :wasabi-buffer)
                                                      :status-type 'fetch-contacts
-                                                     :status-message "Loading contacts..."))))
+                                                     :status-message (wasabi--make-loading-message)))))
                             ((equal (map-elt notification 'method) "LoggedOut")
                              (map-put! (wasabi--state) :connected nil)
                              (wasabi--log "Logged out, disconnecting and reconnecting for QR code")
@@ -592,18 +649,22 @@ Calls ON-FAILURE with error if download fails."
                              (wasabi--send-disconnect-request
                               :on-disconnected (lambda ()
                                                  (wasabi--log "Disconnected, now reconnecting")
-                                                 (let ((home-buffer (map-elt (wasabi--state) :home-buffer)))
-                                                   (wasabi--initialize :home-buffer home-buffer
+                                                 (let ((wasabi-buffer (map-elt (wasabi--state) :wasabi-buffer)))
+                                                   (wasabi--initialize :wasabi-buffer wasabi-buffer
                                                                        :status-type 'connect-session
-                                                                       :status-message "Reconnecting for authentication...")))))
+                                                                       :status-message (wasabi--make-loading-message))))))
                             ((equal (map-elt notification 'method) "OfflineSyncCompleted")
                              (wasabi--log "Offline sync completed")
                              (let ((status-type (map-nested-elt (wasabi--state) '(:status :type))))
-                               ;; If we're ready, just refresh chat index
-                               ;; (Contacts may not be available yet on fresh pairing - that's a protocol limitation)
+                               ;; If we're ready, re-fetch all data since WhatsApp just synced
                                (when (eq status-type 'ready)
-                                 (wasabi--log "Refreshing chat index after sync")
-                                 (wasabi--send-chat-history-request :chat-jid "index"))))
+                                 (wasabi--log "Refreshing all data after OfflineSyncCompleted")
+                                 ;; Re-run the fetch sequence to pick up synced data
+                                 ;; Silent mode: no visual status updates, only refresh at the end
+                                 (map-put! (wasabi--state) :silent-refresh t)
+                                 (wasabi--initialize :wasabi-buffer (map-elt (wasabi--state) :wasabi-buffer)
+                                                     :status-type 'fetch-contacts
+                                                     :status-message (wasabi--make-loading-message)))))
                             ((equal (map-elt notification 'method) "AppStateSyncComplete")
                              (wasabi--log "App state sync complete"))
                             ((equal (map-elt notification 'method) "ConnectFailure")
@@ -649,16 +710,20 @@ Calls ON-FAILURE with error if download fails."
                                        (wasabi-chat--append-message message)))))))
                             ((equal (map-elt notification 'method) "HistorySync")
                              (wasabi--log "HistorySync received")
+                             (wasabi--log "HistorySync: current-buffer=%s, major-mode=%s" (current-buffer) major-mode)
                              ;; If we're ready, re-fetch all data since WhatsApp just synced history
                              (let ((status-type (map-nested-elt (wasabi--state) '(:status :type))))
+                               (wasabi--log "HistorySync: status-type=%s, ready?=%s" status-type (eq status-type 'ready))
                                (when (eq status-type 'ready)
                                  (wasabi--log "Refreshing all data after HistorySync")
                                  ;; Re-run the fetch sequence to pick up synced data.
                                  ;; Starting from fetch-contacts triggers the chain:
                                  ;; fetch-contacts -> fetch-groups -> fetch-chats -> ready
-                                 (wasabi--initialize :home-buffer (map-elt (wasabi--state) :home-buffer)
+                                 ;; Silent mode: no visual status updates, only refresh at the end
+                                 (map-put! (wasabi--state) :silent-refresh t)
+                                 (wasabi--initialize :wasabi-buffer (map-elt (wasabi--state) :wasabi-buffer)
                                                      :status-type 'fetch-contacts
-                                                     :status-message "Refreshing after sync..."))))))))
+                                                     :status-message (wasabi--make-loading-message)))))))))
 
 (defun wasabi--log (format-string &rest args)
   "Log a debug message to *Wasabi-Log* buffer."
@@ -725,13 +790,15 @@ This function displayes TEXT only, wiping everything else."
       (dolist (cl centered-lines)
         (insert cl "\n")))))
 
-(cl-defun wasabi--make-state (&key home-buffer)
+(cl-defun wasabi--make-state (&key wasabi-buffer)
   "Construct chat client state with home HOME-BUFFER.
 
 State uses :status to track initialization progress (see `wasabi--make-status').
 The :connected flag tracks WhatsApp connection state (updated by notifications)."
+  (unless wasabi-buffer
+    (error ":wasabi-buffer is required"))
   (list (cons :client nil)
-        (cons :home-buffer home-buffer)
+        (cons :wasabi-buffer wasabi-buffer)
         (cons :status nil)
         ;; :connected tracks async WhatsApp connection state (set by notifications)
         (cons :connected nil)
@@ -782,17 +849,18 @@ MESSAGE is displayed if present. When TYPE is ready, the chat list is rendered."
   `((:type . ,type)
     (:message . ,message)))
 
-(cl-defun wasabi--set-status (&key type message)
-  "Set the current status and refresh the display."
+(cl-defun wasabi--set-status (&key type message silent)
+  "Set the current status and refresh the display.
+Optional SILENT suppresses visual messaging during status change."
   (wasabi--log "Status change: %s \"%s\"" type message)
   (unless (derived-mode-p 'wasabi-mode)
     (error "Not in a chats buffer"))
   (map-put! (wasabi--state) :status (wasabi--make-status :type type :message message))
-  ;; Header line should be present only when ready.
   (if (eq type 'ready)
       (wasabi--update-header-line)
     (setq header-line-format nil))
-  (wasabi--refresh))
+  (when (or (eq type 'ready) (not silent))
+    (wasabi--refresh)))
 
 (defun wasabi--timezone ()
   "Return the current time zone."
@@ -875,8 +943,10 @@ FACE when non-nil applies the specified face to the text."
                     (:command wasabi-quit :description "quit"))))
     (setq header-line-format
           (concat
-           " "
-           (wasabi-icon (wasabi--face-height-pixels 'font-lock-doc-face))
+           (when (wasabi--header-graphical-p)
+             (concat
+              " "
+              (wasabi-icon (wasabi--face-height-pixels 'font-lock-doc-face))))
            " "
            (propertize "Recent Chats" 'face 'font-lock-doc-face)
            " "
@@ -914,23 +984,23 @@ FACE when non-nil applies the specified face to the text."
 (defun wasabi ()
   "Create or switch to the `*Wasabi*` buffer in `wasabi-mode`."
   (interactive)
-  (let ((home-buffer (get-buffer-create "*Wasabi*")))
-    (with-current-buffer home-buffer
+  (let ((wasabi-buffer (get-buffer-create "*Wasabi*")))
+    (with-current-buffer wasabi-buffer
       (unless (derived-mode-p 'wasabi-mode)
         (wasabi-mode))
       (add-hook 'kill-buffer-hook #'wasabi--clean-up nil t)
       (add-hook 'window-size-change-functions
                 (lambda (_frame)
-                  (with-current-buffer home-buffer
+                  (with-current-buffer wasabi-buffer
                     (when (map-nested-elt (wasabi--state) '(:status :message))
                       (wasabi--refresh)))) nil t)
       (add-hook 'window-configuration-change-hook
                 (lambda ()
-                  (with-current-buffer home-buffer
+                  (with-current-buffer wasabi-buffer
                     (when (map-nested-elt (wasabi--state) '(:status :message))
                       (wasabi--refresh)))) nil t)
-      (wasabi--initialize :home-buffer home-buffer))
-    (switch-to-buffer home-buffer)
+      (wasabi--initialize :wasabi-buffer wasabi-buffer))
+    (switch-to-buffer wasabi-buffer)
     (wasabi--refresh)))
 
 (defun wasabi--buffer ()
@@ -945,12 +1015,12 @@ Error if not found."
   (unless (derived-mode-p 'wasabi-mode)
     (user-error "Not in a chats buffer"))
   (wasabi--log "Refresh requested, resetting state and restarting...")
-  (let ((home-buffer (current-buffer)))
+  (let ((wasabi-buffer (current-buffer)))
     (when (map-elt (wasabi--state) :client)
       (acp-shutdown :client (map-elt (wasabi--state) :client)))
     (setq wasabi--state nil)
     (wasabi--log "==== new session ====")
-    (wasabi--initialize :home-buffer home-buffer)))
+    (wasabi--initialize :wasabi-buffer wasabi-buffer)))
 
 (defun wasabi-new-chat-new-number ()
   "Start a new chat with a new phone number."
@@ -1041,12 +1111,10 @@ With prefix argument, prompt for a phone number to chat with directly."
   "Refresh the display based on current status."
   (save-excursion
     (let* ((status (map-elt (wasabi--state) :status))
-           (status-type (when status (map-elt status :type)))
-           (message (when status (map-elt status :message)))
            (chats-index (map-elt (wasabi--state) :chats-index)))
       (cond
        ;; Only render chat list when status is 'ready
-       ((eq status-type 'ready)
+       ((eq (map-elt status :type) 'ready)
         (if (null chats-index)
             ;; No chats available - show empty state
             (let ((inhibit-read-only t))
@@ -1078,11 +1146,8 @@ With prefix argument, prompt for a phone number to chat with directly."
               (insert "\n")
               (insert (mapconcat #'identity chat-lines "\n"))))))
        ;; For all other statuses, show the message
-       (message
-        (wasabi--message :text message))
-       ;; Fallback if no message (shouldn't happen)
-       (t
-        (wasabi--message :text "Loading..."))))))
+       ((map-elt status :message)
+        (wasabi--message :text (map-elt status :message)))))))
 
 (defun wasabi--state ()
   "Get shell state or fail in an incompatible buffer."
