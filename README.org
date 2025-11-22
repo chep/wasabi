@@ -28,7 +28,7 @@ You'll need [[https://github.com/asternic/wuzapi][wuzapi]].
 ** Homebrew
 
 #+begin_src sh
-  brew install xenodium/wuzapi/wuzapi
+  brew install asternic/wuzapi/wuzapi
 #+end_src
 
 * Install
