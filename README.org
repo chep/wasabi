@@ -1,10 +1,8 @@
 ✨ [[https://github.com/sponsors/xenodium][sponsor this project]] ✨
 
-* Wasabi (わさび)
-
 [[file:./icon/wasabi_x200.png]]
 
-* About
+* Wasabi (わさび)
 
 Wasabi is a native Emacs interface for [[https://www.whatsapp.com/][WhatsApp]] messaging.
 
