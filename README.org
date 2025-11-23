@@ -24,17 +24,37 @@ This project needs funding. Make the work sustainable by ✨[[https://github.com
 
 You can learn more about [[https://xenodium.com/want-a-whatsapp-emacs-client][plans in this post]].
 
-* Dependency
+* Setup
+
+** Install =wuzapi= dependency
 
 You'll need [[https://github.com/asternic/wuzapi][wuzapi]].
 
-** Homebrew
+*** Via homebrew
 
 #+begin_src sh
   brew install asternic/wuzapi/wuzapi
 #+end_src
 
-* Install
+*** Build =wuzapi= from source
+
+Requires the [[https://go.dev/][Go]] toolchain.
+
+#+begin_src sh
+  git clone https://github.com/asternic/wuzapi.git
+  cd wuzapi
+  go build .
+#+end_src
+
+The compiled =wuzapi= binary will be in the current directory.
+
+You can move it to a location in your PATH or add =wuzapi='s location to Emacs's =exec-path=.
+
+** Install =wasabi=
+
+=Wasabi= isn't on MELPA just yet. You'll need to install it from it GitHub repo.
+
+You can use something like:
 
 #+begin_src emacs-lisp
   (use-package wasabi
