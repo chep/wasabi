@@ -59,7 +59,8 @@ You can use something like:
 
 #+begin_src emacs-lisp
   (use-package wasabi
-    :vc (:url "https://github.com/xenodium/wasabi"))
+    :ensure t
+    :vc (:url "https://github.com/xenodium/wasabi" :branch "main"))
 #+end_src
 
 /Note: Wasabi currently depends on [[https://github.com/xenodium/acp.el][acp.el]] (available on [[https://melpa.org/#/acp][MELPA]]) ->purely<- for its [[https://www.jsonrpc.org/specification][json-rpc]] implementation./
