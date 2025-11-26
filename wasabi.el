@@ -426,11 +426,10 @@ Invoke ON-FINISHED on success."
                               :token wasabi-user-token
                               :chat-jid chat-jid)
                     :on-success (lambda (response)
-                                  (wasabi--log "Chat history response for %s: type=%s length=%s value=%S"
+                                  (wasabi--log "Chat history response for %s: type=%s length=%s"
                                                chat-jid
                                                (type-of response)
-                                               (if (listp response) (length response) "N/A")
-                                               response)
+                                               (if (listp response) (length response) "N/A"))
                                   (cond
                                    ;; Handle "index" response: {"user-id": [...]} from backend
                                    ;; Backend returns map of user-id to chat arrays
