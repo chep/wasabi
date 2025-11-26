@@ -501,7 +501,12 @@ Shows different bindings depending on whether point is in input area."
                        (with-current-buffer chat-buffer
                          (wasabi-chat--append-message message))
                        (with-current-buffer chat-buffer
-                         (goto-char (point-max)))))))))
+                         (goto-char (point-max)))
+                       (with-current-buffer chat-buffer
+                         (when (get-buffer-window chat-buffer)
+                           ;; Recenter to bottom (based on `recenter-top-bottom')
+                           (recenter (- -1 (min (max 0 scroll-margin)
+		                                (truncate (/ (window-body-height) 4.0)))) t)))))))))
 
 (defun wasabi-chat-refresh ()
   "Refresh the current chat buffer by fetching new messages."
@@ -711,36 +716,38 @@ Updates :messages list and :max-sender-width in chat state."
     (error "message is required"))
   (let ((inhibit-read-only t)
         (saved-input nil))
-    (save-excursion
-      (when wasabi-chat--prompt-marker
-        ;; Save any user input before deleting the prompt
-        (setq saved-input (wasabi-chat--get-prompt-input))
-        ;; Delete the existing prompt
-        (delete-region wasabi-chat--prompt-marker (point-max)))
+    (when wasabi-chat--prompt-marker
+      ;; Save any user input before deleting the prompt
+      (setq saved-input (wasabi-chat--get-prompt-input))
+      ;; Delete the existing prompt
+      (delete-region wasabi-chat--prompt-marker (point-max)))
+    (goto-char (point-max))
+    (let* ((start (point))
+           (sender-width (string-width (map-elt message :sender-name)))
+           (old-max-width (or (map-elt wasabi-chat--chat :max-sender-width) 0))
+           (new-max-width (max old-max-width sender-width))
+           (updated-messages (append (map-elt wasabi-chat--chat :messages)
+                                     (list message))))
+      ;; Update chat state with new messages and max-width
+      (wasabi-chat--update-chat :max-sender-width new-max-width)
+      (wasabi-chat--update-chat :messages updated-messages)
+      ;; Render the message
+      (insert (wasabi-chat--render-message
+               :sender-name (map-elt message :sender-name)
+               :timestamp (map-elt message :timestamp)
+               :content (map-elt message :content)
+               :max-sender-width (map-elt wasabi-chat--chat :max-sender-width)
+               :reactions (map-elt message :reactions)
+               :message-id (map-elt message :message-id)))
+      (put-text-property start (point) 'read-only t))
+    (wasabi-chat--setup-prompt)
+    ;; Restore saved input
+    (when (and saved-input (not (string-empty-p saved-input)))
       (goto-char (point-max))
-      (let* ((start (point))
-             (sender-width (string-width (map-elt message :sender-name)))
-             (old-max-width (or (map-elt wasabi-chat--chat :max-sender-width) 0))
-             (new-max-width (max old-max-width sender-width))
-             (updated-messages (append (map-elt wasabi-chat--chat :messages)
-                                       (list message))))
-        ;; Update chat state with new messages and max-width
-        (wasabi-chat--update-chat :max-sender-width new-max-width)
-        (wasabi-chat--update-chat :messages updated-messages)
-        ;; Render the message
-        (insert (wasabi-chat--render-message
-                 :sender-name (map-elt message :sender-name)
-                 :timestamp (map-elt message :timestamp)
-                 :content (map-elt message :content)
-                 :max-sender-width (map-elt wasabi-chat--chat :max-sender-width)
-                 :reactions (map-elt message :reactions)
-                 :message-id (map-elt message :message-id)))
-        (put-text-property start (point) 'read-only t))
-      (wasabi-chat--setup-prompt)
-      ;; Restore saved input
-      (when (and saved-input (not (string-empty-p saved-input)))
-        (goto-char (point-max))
-        (insert saved-input)))
+      (insert saved-input))
+    ;; Recenter to bottom (based on `recenter-top-bottom')
+    (recenter (- -1 (min (max 0 scroll-margin)
+		         (truncate (/ (window-body-height) 4.0)))) t)
     (wasabi-chat--update-header-line)))
 
 (cl-defun wasabi-chat--add-reaction (&key target-id emoji sender)
