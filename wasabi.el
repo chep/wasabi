@@ -36,6 +36,7 @@
 (require 'seq)
 (require 'wasabi-chat)
 (require 'wasabi-icon)
+(require 'wasabi-notifications)
 
 (defcustom wasabi-user-token (concat
                               (or (user-login-name)
@@ -699,6 +700,7 @@ Calls ON-FAILURE with error if download fails."
                                                              :contact-name (map-elt wasabi-chat--chat :contact-name)
                                                              :chat-jid chat-jid
                                                              :contacts contacts))))
+									 (wasabi--notify message)
                                      (if (map-elt message :is-reaction)
                                          (wasabi-chat--add-reaction
                                           :target-id (map-elt message :target-id)
