@@ -72,20 +72,18 @@ This can be:
   (when (featurep 'notifications)
     (if (map-elt message :is-reaction)
         (notifications-notify
-         :title "Wasabi Notification"
+         :title (map-elt message :sender-name)
          :body
          (concat
-          (map-elt message :sender-name)
-          " reacted to "
+          "Reacted to "
           (wasabi--get-msg-content (map-elt message :target-id))
           " with: "
           (map-elt message :emoji))
          :app-name "Wasabi"
          :urgency 'normal)
       (notifications-notify
-       :title "Wasabi Notification"
-       :body
-       (concat (map-elt message :sender-name) ": " (map-elt message :content))
+       :title (map-elt message :sender-name)
+       :body (map-elt message :content)
        :app-name "Wasabi"
        :urgency 'normal))))
 
@@ -94,19 +92,17 @@ This can be:
   (when (featurep 'knockknock)
     (if (map-elt message :is-reaction)
         (knockknock-notify
-         :title "Wasabi Notification"
+         :title (map-elt message :sender-name)
          :message
          (concat
-          (map-elt message :sender-name)
-          " reacted to "
+          "Reacted to "
           (wasabi--get-msg-content (map-elt message :target-id))
           " with: "
           (map-elt message :emoji))
          :app-name "Wasabi")
       (knockknock-notify
-       :title "Wasabi Notification"
-       :message
-       (concat (map-elt message :sender-name) ": " (map-elt message :content))
+       :title (map-elt message :sender-name)
+       :message (map-elt message :content)
        :app-name "Wasabi"))))
 
 
