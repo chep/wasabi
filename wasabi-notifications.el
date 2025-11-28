@@ -80,11 +80,13 @@ This can be:
           " with: "
           (map-elt message :emoji))
          :app-name "Wasabi"
+         :app-icon (wasabi-icon--svg-file)
          :urgency 'normal)
       (notifications-notify
        :title (map-elt message :sender-name)
        :body (map-elt message :content)
        :app-name "Wasabi"
+       :app-icon (wasabi-icon--svg-file)
        :urgency 'normal))))
 
 (defun wasabi--notify-with-knockknock (message)
@@ -99,11 +101,13 @@ This can be:
           (wasabi--get-msg-content (map-elt message :target-id))
           " with: "
           (map-elt message :emoji))
-         :app-name "Wasabi")
+         :app-name "Wasabi"
+         :icon-file (wasabi-icon--svg-file))
       (knockknock-notify
        :title (map-elt message :sender-name)
        :message (map-elt message :content)
-       :app-name "Wasabi"))))
+       :app-name "Wasabi"
+       :icon-file (wasabi-icon--svg-file)))))
 
 
 (provide 'wasabi-notifications)
