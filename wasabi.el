@@ -4,7 +4,7 @@
 
 ;; Author: Alvaro Ramirez https://xenodium.com
 ;; URL: https://github.com/xenodium/wasabi
-;; Version: 0.2.1
+;; Version: 0.3.1
 ;; Package-Requires: ((emacs "29.1") (acp "0.7.1"))
 
 ;; This file is not part of GNU Emacs.
@@ -615,9 +615,17 @@ Calls ON-FAILURE with error if download fails."
    :client (map-elt wasabi--state :client)
    :on-error (lambda (error)
                (wasabi--log "Something is wrong %s" error)
-               (wasabi--set-status
-                :type 'error
-                :message (wasabi--refresh-error :message "Something is not right"))))
+               ;; wuzapi writes normal INFO/DEBUG/WARN logs to stderr, which newer acp.el
+               ;; versions treat as errors. Only treat it as a real error if the message
+               ;; doesn't look like a plain wuzapi log line (which start with a timestamp
+               ;; or JSON level field, not an actual error condition).
+               (let* ((msg (or (map-elt error 'message) ""))
+                      (looks-like-log (or (string-match-p "^[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}" msg)
+                                          (string-match-p "\"level\":" msg))))
+                 (unless looks-like-log
+                   (wasabi--set-status
+                    :type 'error
+                    :message (wasabi--refresh-error :message "Something is not right"))))))
   (acp-subscribe-to-notifications
    :client (map-elt wasabi--state :client)
    :on-notification (lambda (notification)
@@ -760,7 +768,8 @@ MESSAGE should be a string like \"Failed to connect\"."
                                    ;; Pad image string with * so it can be centered in screen.
                                    (concat (make-string (round (car (image-size image))) ?*) "\n")
                                    'display image)
-                                  "\nScan from WhatsApp mobile to enable client"))))
+                                  "\nScan from WhatsApp mobile to enable client"
+                                  "\n\nor invoke M-x wasabi-pair-phone-number"))))
 
 (cl-defun wasabi--message (&key text)
   "Display centered TEXT centered in current buffer.
@@ -1110,6 +1119,43 @@ With prefix argument NEW-NUMBER, prompt for a phone number."
   "Open data directory (database, media, etc)."
   (interactive)
   (find-file (wasabi-data-dir)))
+
+(defun wasabi-pair-phone-number (phone)
+  "Pair WhatsApp using PHONE number instead of QR code.
+
+This is an alternative to QR code scanning for users who cannot
+scan QR codes (e.g., screen reader users or TTY environments).
+
+PHONE should include the country code (e.g., \"+1234567890\").
+
+The session must be connected but not logged in (i.e., the QR code
+should be displayed). After calling this, an 8-character code will
+be shown in the minibuffer and copied to the kill ring. Enter this
+code in WhatsApp mobile: Settings -> Linked Devices -> Link a Device
+-> Link with phone number instead."
+  (interactive "sPhone number (with country code, e.g., +1234567890): ")
+  (unless (wasabi--state)
+    (user-error "Wasabi not running.  Start with M-x wasabi"))
+  (unless (map-elt (wasabi--state) :client)
+    (user-error "Wasabi client not initialized"))
+  (let ((status-type (map-nested-elt (wasabi--state) '(:status :type))))
+    (unless (memq status-type '(qr awaiting-connection already-connected))
+      (user-error "Cannot pair now.  QR code must be displayed first (status: %s)" status-type)))
+  (acp-send-request
+   :client (map-elt (wasabi--state) :client)
+   :request (wasabi--make-session-pairphone-request
+             :token wasabi-user-token
+             :phone (string-trim phone))
+   :on-success (lambda (response)
+                 (if (map-elt response 'LinkingCode)
+                     (progn
+                       (kill-new (map-elt response 'LinkingCode))
+                       (message "Pairing code: %s (copied to kill ring)"
+                                (map-elt response 'LinkingCode)))
+                   (message "Unexpected response: %s" response)))
+   :on-failure (lambda (error)
+                 (message "Pairing failed: %s"
+                          (or (map-elt error 'message) error)))))
 
 (defalias 'wasabi-new-message #'wasabi-new-chat)
 
@@ -1481,6 +1527,28 @@ Optional parameters:
     (error ":token is required"))
   `((:method . "session.status")
     (:params . ((token . ,token)))))
+
+(cl-defun wasabi--make-session-pairphone-request (&key token phone)
+  "Instantiate a \"session.pairphone\" request.
+
+  Required parameters:
+    TOKEN - User authentication token
+    PHONE - Phone number with country code (e.g., \"+1234567890\")
+
+  Returns an 8-character linking code that the user enters in their
+  WhatsApp mobile app to pair the device. This is an alternative to
+  QR code scanning, useful for accessibility or TTY environments.
+
+  The session must be connected but not logged in for this to work.
+
+  See: stdio.go:260, handlers.go (PairPhone)"
+  (unless token
+    (error ":token is required"))
+  (unless phone
+    (error ":phone is required"))
+  `((:method . "session.pairphone")
+    (:params . ((token . ,token)
+                (Phone . ,phone)))))
 
 (cl-defun wasabi--make-chat-send-text-request (&key token
                                                     phone
